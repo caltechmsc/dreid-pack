@@ -1,0 +1,37 @@
+[package]
+name = "dreid-pack"
+version = "0.1.0"
+authors = [
+    "Tony Kan <tonykan@caltech.edu>",
+    "William A. Goddard III <wag@caltech.edu>",
+]
+license = "MIT"
+repository = "https://github.com/caltechmsc/dreid-pack"
+edition = "2024"
+description = "A high-performance, pure Rust library for full-atom protein side-chain packing using the DREIDING force field, Goldstein+Split DEE, and tree-decomposition DP—with native protein-ligand and protein-nucleic acid interface support."
+keywords = [
+    "structural-biology",
+    "bioinformatics",
+    "cheminformatics",
+    "dreiding",
+    "protein",
+]
+categories = ["science::computational-biology::structural-modeling"]
+readme = "README.md"
+
+[dependencies]
+thiserror = "2.0.18"
+dreid-forge = "0.4.0"
+dreid-kernel = "0.4.1"
+dunbrack = "0.1.0"
+rotamer = "0.1.0"
+
+[lib]
+name = "dreid_pack"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
