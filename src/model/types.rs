@@ -7,5 +7,14 @@ pub struct Vec3 {
     pub z: f32,
 }
 
-/// DREIDING atom-type index.
-pub type TypeIdx = u8;
+/// DREIDING atom-type table index.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeIdx(pub u8);
+
+impl From<TypeIdx> for usize {
+    #[inline]
+    fn from(t: TypeIdx) -> usize {
+        t.0 as usize
+    }
+}
