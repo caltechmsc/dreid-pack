@@ -39,6 +39,18 @@ pub struct Residue {
     donor_of_h: ArrayVec<u8, MAX_SIDECHAIN_ATOMS>,
 }
 
+/// Per-atom sidechain data for constructing a [`Residue`].
+pub struct SidechainAtoms<'a> {
+    /// Per-atom sidechain atom coordinates.
+    pub coords: &'a [Vec3],
+    /// Per-atom DREIDING type.
+    pub types: &'a [TypeIdx],
+    /// Per-atom partial charges (e).
+    pub charges: &'a [f32],
+    /// H -> local donor index (u8::MAX = not an H, or no donor recorded).
+    pub donor_of_h: &'a [u8],
+}
+
 impl Residue {
     /// Returns `None` if `res_type` is not packable (Gly, Ala).
     pub fn new(
@@ -46,10 +58,7 @@ impl Residue {
         anchor: [Vec3; 3],
         phi: f32,
         psi: f32,
-        sidechain: &[Vec3],
-        atom_types: &[TypeIdx],
-        atom_charges: &[f32],
-        donor_of_h: &[u8],
+        atoms: SidechainAtoms<'_>,
     ) -> Option<Self> {
         if !res_type.is_packable() {
             return None;
@@ -59,10 +68,10 @@ impl Residue {
             anchor,
             phi,
             psi,
-            sidechain: sidechain.iter().copied().collect(),
-            atom_types: atom_types.iter().copied().collect(),
-            atom_charges: atom_charges.iter().copied().collect(),
-            donor_of_h: donor_of_h.iter().copied().collect(),
+            sidechain: atoms.coords.iter().copied().collect(),
+            atom_types: atoms.types.iter().copied().collect(),
+            atom_charges: atoms.charges.iter().copied().collect(),
+            donor_of_h: atoms.donor_of_h.iter().copied().collect(),
         })
     }
 
@@ -212,19 +221,21 @@ mod tests {
 
     fn ser_residue() -> Residue {
         let anchor = [v(0.0, 0.0, 0.0), v(1.5, 0.0, 0.0), v(3.0, 0.0, 0.0)];
-        let sidechain = [v(1.0, 1.0, 0.0); 5];
-        let atom_types = [t(1); 5];
-        let atom_charges = [0.1f32; 5];
+        let coords = [v(1.0, 1.0, 0.0); 5];
+        let types = [t(1); 5];
+        let charges = [0.1f32; 5];
         let donor_of_h = [u8::MAX; 5];
         Residue::new(
             ResidueType::Ser,
             anchor,
             -1.0,
             1.0,
-            &sidechain,
-            &atom_types,
-            &atom_charges,
-            &donor_of_h,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
         )
         .unwrap()
     }
@@ -244,8 +255,20 @@ mod tests {
     #[test]
     fn residue_new_rejects_non_packable() {
         let anchor = [v(0.0, 0.0, 0.0); 3];
-        assert!(Residue::new(ResidueType::Gly, anchor, 0.0, 0.0, &[], &[], &[], &[]).is_none());
-        assert!(Residue::new(ResidueType::Ala, anchor, 0.0, 0.0, &[], &[], &[], &[]).is_none());
+        let empty = SidechainAtoms {
+            coords: &[],
+            types: &[],
+            charges: &[],
+            donor_of_h: &[],
+        };
+        assert!(Residue::new(ResidueType::Gly, anchor, 0.0, 0.0, empty).is_none());
+        let empty = SidechainAtoms {
+            coords: &[],
+            types: &[],
+            charges: &[],
+            donor_of_h: &[],
+        };
+        assert!(Residue::new(ResidueType::Ala, anchor, 0.0, 0.0, empty).is_none());
     }
 
     #[test]
