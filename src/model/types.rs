@@ -7,6 +7,27 @@ pub struct Vec3 {
     pub z: f32,
 }
 
+impl Vec3 {
+    /// Returns the zero vector.
+    pub const fn zero() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+
+    /// Returns the vector with all components set to `v`.
+    pub const fn splat(v: f32) -> Self {
+        Self { x: v, y: v, z: v }
+    }
+
+    /// Returns the vector with components `(x, y, z)`.
+    pub const fn new(x: f32, y: f32, z: f32) -> Self {
+        Self { x, y, z }
+    }
+}
+
 /// DREIDING atom-type table index.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
