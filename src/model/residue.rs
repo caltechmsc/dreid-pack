@@ -123,3 +123,23 @@ impl ResidueType {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ResidueType;
+
+    #[test]
+    fn n_atoms_bounds() {
+        assert_eq!(ResidueType::Gly.n_atoms(), 0);
+        assert_eq!(ResidueType::Trp.n_atoms(), 18);
+        assert_eq!(ResidueType::Arg.n_atoms(), 18);
+        assert_eq!(ResidueType::Ser.n_atoms(), 5);
+    }
+
+    #[test]
+    fn is_packable_gly_ala() {
+        assert!(!ResidueType::Gly.is_packable());
+        assert!(!ResidueType::Ala.is_packable());
+        assert!(ResidueType::Ser.is_packable());
+    }
+}
