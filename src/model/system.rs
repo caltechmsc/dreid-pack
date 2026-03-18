@@ -63,6 +63,15 @@ impl Residue {
         if !res_type.is_packable() {
             return None;
         }
+        let n = atoms.coords.len();
+        debug_assert!(n <= MAX_SIDECHAIN_ATOMS, "too many sidechain atoms: {n}");
+        debug_assert_eq!(atoms.types.len(), n, "types/coords length mismatch");
+        debug_assert_eq!(atoms.charges.len(), n, "charges/coords length mismatch");
+        debug_assert_eq!(
+            atoms.donor_of_h.len(),
+            n,
+            "donor_of_h/coords length mismatch"
+        );
         Some(Self {
             res_type,
             anchor,
