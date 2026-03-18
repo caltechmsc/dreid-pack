@@ -26,8 +26,16 @@ pub struct FixedAtoms<'a> {
 
 impl<'a> FixedAtoms<'a> {
     /// Borrows `pool` and builds the spatial index with `cell_size = vdw_cutoff`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if atom count exceeds `u32::MAX`, or if `vdw_cutoff ≤ 0`.
     pub fn build(pool: &'a FixedAtomPool, vdw_cutoff: f32) -> Self {
         let n = pool.positions.len();
+        assert!(
+            n <= u32::MAX as usize,
+            "atom count {n} exceeds u32 capacity"
+        );
         debug_assert_eq!(pool.types.len(), n, "types/positions length mismatch");
         debug_assert_eq!(pool.charges.len(), n, "charges/positions length mismatch");
         debug_assert_eq!(
