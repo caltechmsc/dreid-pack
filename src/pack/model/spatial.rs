@@ -24,11 +24,17 @@ impl<T: Copy> SpatialGrid<T> {
     ///
     /// # Panics
     ///
-    /// Panics if `cell_size ≤ 0`.
+    /// Panics if `cell_size ≤ 0`, or if item count exceeds `u32::MAX`.
     pub fn build(items: impl IntoIterator<Item = (Vec3, T)>, cell_size: f32) -> Self {
         assert!(cell_size > 0.0, "cell_size must be positive");
 
         let items: Vec<(Vec3, T)> = items.into_iter().collect();
+        let n = items.len();
+
+        assert!(
+            n <= u32::MAX as usize,
+            "item count {n} exceeds u32 capacity"
+        );
 
         if items.is_empty() {
             return Self {
