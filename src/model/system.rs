@@ -413,4 +413,113 @@ mod tests {
         assert_eq!(fixed.types.len(), fixed.charges.len());
         assert_eq!(fixed.charges.len(), fixed.donor_for_h.len());
     }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn residue_new_panics_when_coords_exceed_max_sidechain_atoms() {
+        let anchor = [v(0.0, 0.0, 0.0); 3];
+        let n = MAX_SIDECHAIN_ATOMS + 1;
+        let coords = vec![v(1.0, 0.0, 0.0); n];
+        let types = vec![t(1); n];
+        let charges = vec![0.1f32; n];
+        let donor_of_h = vec![u8::MAX; n];
+        Residue::new(
+            ResidueType::Ser,
+            anchor,
+            0.0,
+            0.0,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn residue_new_panics_on_types_length_mismatch() {
+        let anchor = [v(0.0, 0.0, 0.0); 3];
+        let coords = [v(1.0, 1.0, 0.0); 5];
+        let types = [t(1); 3];
+        let charges = [0.1f32; 5];
+        let donor_of_h = [u8::MAX; 5];
+        Residue::new(
+            ResidueType::Ser,
+            anchor,
+            0.0,
+            0.0,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn residue_new_panics_on_charges_length_mismatch() {
+        let anchor = [v(0.0, 0.0, 0.0); 3];
+        let coords = [v(1.0, 1.0, 0.0); 5];
+        let types = [t(1); 5];
+        let charges = [0.1f32; 4];
+        let donor_of_h = [u8::MAX; 5];
+        Residue::new(
+            ResidueType::Ser,
+            anchor,
+            0.0,
+            0.0,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn residue_new_panics_on_donor_of_h_length_mismatch() {
+        let anchor = [v(0.0, 0.0, 0.0); 3];
+        let coords = [v(1.0, 1.0, 0.0); 5];
+        let types = [t(1); 5];
+        let charges = [0.1f32; 5];
+        let donor_of_h = [u8::MAX; 2];
+        Residue::new(
+            ResidueType::Ser,
+            anchor,
+            0.0,
+            0.0,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn vdw_matrix_new_panics_on_wrong_data_length() {
+        VdwMatrix::new(3, vec![(1.0f32, 1.0f32); 8]);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn set_sidechain_panics_on_overflow() {
+        let mut r = ser_residue();
+        let too_many = vec![v(1.0, 0.0, 0.0); MAX_SIDECHAIN_ATOMS + 1];
+        r.set_sidechain(&too_many);
+    }
 }
