@@ -73,3 +73,121 @@ impl ContactGraph {
         &self.edges
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn neighbors_sorted(g: &ContactGraph, s: usize) -> Vec<u32> {
+        let mut v = g.neighbors(s).to_vec();
+        v.sort_unstable();
+        v
+    }
+
+    fn triangle() -> ContactGraph {
+        ContactGraph::build(3, [(0, 1), (0, 2), (1, 2)])
+    }
+
+    #[test]
+    fn build_zero_slots_zero_edges() {
+        let g = ContactGraph::build(0, []);
+        assert_eq!(g.n_slots(), 0);
+        assert_eq!(g.n_edges(), 0);
+    }
+
+    #[test]
+    fn n_slots_matches_argument() {
+        let g = ContactGraph::build(5, []);
+        assert_eq!(g.n_slots(), 5);
+    }
+
+    #[test]
+    fn n_edges_zero_when_no_edges() {
+        let g = ContactGraph::build(4, []);
+        assert_eq!(g.n_edges(), 0);
+    }
+
+    #[test]
+    fn self_loop_is_silently_dropped() {
+        let g = ContactGraph::build(3, [(1, 1), (0, 1)]);
+        assert_eq!(g.n_edges(), 1);
+    }
+
+    #[test]
+    fn reversed_edge_is_canonicalized() {
+        let g = ContactGraph::build(4, [(3u32, 1u32)]);
+        assert_eq!(g.edges(), &[(1, 3)]);
+    }
+
+    #[test]
+    fn duplicate_edge_is_deduplicated() {
+        let g = ContactGraph::build(3, [(0, 1), (0, 1)]);
+        assert_eq!(g.n_edges(), 1);
+    }
+
+    #[test]
+    fn reversed_duplicate_is_deduplicated() {
+        let g = ContactGraph::build(3, [(0, 2), (2, 0)]);
+        assert_eq!(g.n_edges(), 1);
+    }
+
+    #[test]
+    fn all_filters_combined() {
+        let g = ContactGraph::build(4, [(0, 0), (2, 1), (1, 2), (0, 3)]);
+        assert_eq!(g.edges(), &[(0, 3), (1, 2)]);
+    }
+
+    #[test]
+    fn edges_are_sorted_lexicographically() {
+        let g = ContactGraph::build(4, [(2u32, 3u32), (0, 1), (1, 3), (0, 2)]);
+        assert_eq!(g.edges(), &[(0, 1), (0, 2), (1, 3), (2, 3)]);
+    }
+
+    #[test]
+    fn edges_content_is_exact() {
+        let g = ContactGraph::build(3, [(1u32, 0u32), (2, 1)]);
+        assert_eq!(g.edges(), &[(0, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn neighbors_are_symmetric() {
+        let g = ContactGraph::build(4, [(0u32, 3u32), (1, 2)]);
+        assert!(g.neighbors(0).contains(&3));
+        assert!(g.neighbors(3).contains(&0));
+        assert!(g.neighbors(1).contains(&2));
+        assert!(g.neighbors(2).contains(&1));
+    }
+
+    #[test]
+    fn isolated_slot_has_empty_neighbors() {
+        let g = ContactGraph::build(5, [(0, 1)]);
+        assert_eq!(g.neighbors(4), &[]);
+    }
+
+    #[test]
+    fn triangle_has_three_edges() {
+        assert_eq!(triangle().n_edges(), 3);
+    }
+
+    #[test]
+    fn triangle_each_slot_has_two_neighbors() {
+        let g = triangle();
+        assert_eq!(neighbors_sorted(&g, 0), vec![1u32, 2]);
+        assert_eq!(neighbors_sorted(&g, 1), vec![0u32, 2]);
+        assert_eq!(neighbors_sorted(&g, 2), vec![0u32, 1]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn build_panics_on_n_slots_overflow() {
+        ContactGraph::build(u32::MAX as usize + 2, []);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn neighbors_panics_out_of_bounds() {
+        let g = ContactGraph::build(3, []);
+        let _ = g.neighbors(3);
+    }
+}
