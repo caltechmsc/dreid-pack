@@ -117,13 +117,20 @@ impl Residue {
         &self.donor_of_h
     }
 
-    /// Write winner sidechain coordinates (internal use only).
+    /// Overwrites the stored sidechain coordinates (internal use only).
     #[inline]
     pub(crate) fn set_sidechain(&mut self, coords: &[Vec3]) {
+        debug_assert!(
+            coords.len() <= MAX_SIDECHAIN_ATOMS,
+            "coords.len()={} > MAX_SIDECHAIN_ATOMS={}",
+            coords.len(),
+            MAX_SIDECHAIN_ATOMS
+        );
         self.sidechain.clear();
-        self.sidechain
-            .try_extend_from_slice(coords)
-            .expect("coords exceed MAX_SIDECHAIN_ATOMS");
+        // SAFETY: coords.len() ≤ MAX_SIDECHAIN_ATOMS = capacity (verified by debug_assert).
+        for &c in coords {
+            unsafe { self.sidechain.push_unchecked(c) };
+        }
     }
 }
 
