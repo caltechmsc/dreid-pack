@@ -61,3 +61,120 @@ impl Conformations {
         self.n_candidates = alive.len() as u16;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    fn three_by_two() -> Conformations {
+        Conformations::new(
+            vec![
+                v(0.0, 0.0, 0.0),
+                v(1.0, 0.0, 0.0),
+                v(0.0, 1.0, 0.0),
+                v(1.0, 1.0, 0.0),
+                v(0.0, 2.0, 0.0),
+                v(1.0, 2.0, 0.0),
+            ],
+            3,
+            2,
+        )
+    }
+
+    #[test]
+    fn new_stores_counts() {
+        let c = three_by_two();
+        assert_eq!(c.n_candidates(), 3);
+        assert_eq!(c.n_atoms(), 2);
+    }
+
+    #[test]
+    fn new_with_zero_candidates() {
+        let c = Conformations::new(vec![], 0, 5);
+        assert_eq!(c.n_candidates(), 0);
+        assert_eq!(c.n_atoms(), 5);
+    }
+
+    #[test]
+    fn coords_of_returns_correct_atoms() {
+        let c = three_by_two();
+        assert_eq!(c.coords_of(0), [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)]);
+        assert_eq!(c.coords_of(1), [v(0.0, 1.0, 0.0), v(1.0, 1.0, 0.0)]);
+        assert_eq!(c.coords_of(2), [v(0.0, 2.0, 0.0), v(1.0, 2.0, 0.0)]);
+    }
+
+    #[test]
+    fn coords_of_single_candidate() {
+        let c = Conformations::new(vec![v(5.0, 6.0, 7.0)], 1, 1);
+        assert_eq!(c.coords_of(0), [v(5.0, 6.0, 7.0)]);
+    }
+
+    #[test]
+    fn compact_retains_subset() {
+        let mut c = three_by_two();
+        c.compact(&[0, 2]);
+        assert_eq!(c.n_candidates(), 2);
+        assert_eq!(c.coords_of(0), [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)]);
+        assert_eq!(c.coords_of(1), [v(0.0, 2.0, 0.0), v(1.0, 2.0, 0.0)]);
+    }
+
+    #[test]
+    fn compact_respects_alive_order() {
+        let mut c = three_by_two();
+        c.compact(&[2, 0]);
+        assert_eq!(c.coords_of(0), [v(0.0, 2.0, 0.0), v(1.0, 2.0, 0.0)]);
+        assert_eq!(c.coords_of(1), [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)]);
+    }
+
+    #[test]
+    fn compact_to_empty() {
+        let mut c = three_by_two();
+        c.compact(&[]);
+        assert_eq!(c.n_candidates(), 0);
+    }
+
+    #[test]
+    fn compact_all_alive() {
+        let mut c = three_by_two();
+        c.compact(&[0, 1, 2]);
+        assert_eq!(c.n_candidates(), 3);
+        assert_eq!(c.coords_of(0), [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)]);
+        assert_eq!(c.coords_of(1), [v(0.0, 1.0, 0.0), v(1.0, 1.0, 0.0)]);
+        assert_eq!(c.coords_of(2), [v(0.0, 2.0, 0.0), v(1.0, 2.0, 0.0)]);
+    }
+
+    #[test]
+    fn compact_updates_n_candidates() {
+        let mut c = three_by_two();
+        c.compact(&[1]);
+        assert_eq!(c.n_candidates(), 1);
+        assert_eq!(c.n_atoms(), 2);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn new_panics_on_length_mismatch() {
+        Conformations::new(vec![v(0.0, 0.0, 0.0)], 1, 2);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn coords_of_panics_out_of_bounds() {
+        let c = three_by_two();
+        let _ = c.coords_of(3);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn compact_panics_on_invalid_index() {
+        let mut c = three_by_two();
+        c.compact(&[0, 3]);
+    }
+}
