@@ -68,3 +68,200 @@ impl<'a> FixedAtoms<'a> {
         self.grid.query(center, radius)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    fn t(n: u8) -> TypeIdx {
+        TypeIdx(n)
+    }
+
+    fn linear_pool(n: usize, step: f32) -> FixedAtomPool {
+        FixedAtomPool {
+            positions: (0..n).map(|i| v(i as f32 * step, 0.0, 0.0)).collect(),
+            types: (0..n as u8).map(t).collect(),
+            charges: (0..n).map(|i| i as f32 * 0.1).collect(),
+            donor_for_h: (0..n as u32)
+                .map(|i| if i % 2 == 0 { i + 1 } else { NO_DONOR })
+                .collect(),
+        }
+    }
+
+    fn neighbor_indices(fa: &FixedAtoms<'_>, center: Vec3, radius: f32) -> Vec<u32> {
+        let mut out: Vec<u32> = fa.neighbors(center, radius).map(|(_, idx)| idx).collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn build_from_empty_pool_is_empty() {
+        let pool = FixedAtomPool {
+            positions: vec![],
+            types: vec![],
+            charges: vec![],
+            donor_for_h: vec![],
+        };
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert!(fa.is_empty());
+        assert_eq!(fa.len(), 0);
+    }
+
+    #[test]
+    fn len_matches_pool_atom_count() {
+        let pool = linear_pool(7, 2.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert!(!fa.is_empty());
+        assert_eq!(fa.len(), 7);
+    }
+
+    #[test]
+    fn positions_slice_matches_pool() {
+        let pool = linear_pool(4, 3.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.positions, pool.positions.as_slice());
+    }
+
+    #[test]
+    fn types_slice_matches_pool() {
+        let pool = linear_pool(5, 2.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.types, pool.types.as_slice());
+    }
+
+    #[test]
+    fn charges_slice_matches_pool() {
+        let pool = linear_pool(5, 2.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.charges, pool.charges.as_slice());
+    }
+
+    #[test]
+    fn donor_for_h_slice_matches_pool() {
+        let pool = linear_pool(6, 2.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.donor_for_h, pool.donor_for_h.as_slice());
+    }
+
+    #[test]
+    fn no_donor_sentinel_is_u32_max() {
+        assert_eq!(NO_DONOR, u32::MAX);
+    }
+
+    #[test]
+    fn no_donor_sentinel_round_trips() {
+        let pool = FixedAtomPool {
+            positions: vec![v(0.0, 0.0, 0.0)],
+            types: vec![t(1)],
+            charges: vec![0.0],
+            donor_for_h: vec![NO_DONOR],
+        };
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.donor_for_h[0], NO_DONOR);
+    }
+
+    #[test]
+    fn neighbors_returns_all_atoms_with_large_radius() {
+        let n = 6usize;
+        let pool = linear_pool(n, 1.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        let indices = neighbor_indices(&fa, v(2.5, 0.0, 0.0), 10.0);
+        assert_eq!(indices, (0..n as u32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn neighbors_returns_correct_subset() {
+        let pool = linear_pool(5, 2.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        let indices = neighbor_indices(&fa, v(4.0, 0.0, 0.0), 2.5);
+        assert_eq!(indices, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn neighbors_includes_atom_at_exact_radius() {
+        let pool = FixedAtomPool {
+            positions: vec![v(3.0, 0.0, 0.0)],
+            types: vec![t(0)],
+            charges: vec![0.0],
+            donor_for_h: vec![NO_DONOR],
+        };
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.neighbors(Vec3::zero(), 3.0).count(), 1);
+    }
+
+    #[test]
+    fn neighbors_excludes_atom_just_outside_radius() {
+        let pool = FixedAtomPool {
+            positions: vec![v(3.01, 0.0, 0.0)],
+            types: vec![t(0)],
+            charges: vec![0.0],
+            donor_for_h: vec![NO_DONOR],
+        };
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.neighbors(Vec3::zero(), 3.0).count(), 0);
+    }
+
+    #[test]
+    fn empty_fixed_atoms_returns_no_neighbors() {
+        let pool = FixedAtomPool {
+            positions: vec![],
+            types: vec![],
+            charges: vec![],
+            donor_for_h: vec![],
+        };
+        let fa = FixedAtoms::build(&pool, 8.0);
+        assert_eq!(fa.neighbors(v(0.0, 0.0, 0.0), 100.0).count(), 0);
+    }
+
+    #[test]
+    fn neighbor_positions_match_stored_positions() {
+        let pool = linear_pool(4, 2.0);
+        let fa = FixedAtoms::build(&pool, 8.0);
+        for (pos, idx) in fa.neighbors(v(3.0, 0.0, 0.0), 10.0) {
+            assert_eq!(pos, fa.positions[idx as usize]);
+        }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn build_panics_on_types_length_mismatch() {
+        let pool = FixedAtomPool {
+            positions: vec![v(0.0, 0.0, 0.0); 3],
+            types: vec![t(0); 2],
+            charges: vec![0.0; 3],
+            donor_for_h: vec![NO_DONOR; 3],
+        };
+        FixedAtoms::build(&pool, 8.0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn build_panics_on_charges_length_mismatch() {
+        let pool = FixedAtomPool {
+            positions: vec![v(0.0, 0.0, 0.0); 3],
+            types: vec![t(0); 3],
+            charges: vec![0.0; 1],
+            donor_for_h: vec![NO_DONOR; 3],
+        };
+        FixedAtoms::build(&pool, 8.0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn build_panics_on_donor_for_h_length_mismatch() {
+        let pool = FixedAtomPool {
+            positions: vec![v(0.0, 0.0, 0.0); 3],
+            types: vec![t(0); 3],
+            charges: vec![0.0; 3],
+            donor_for_h: vec![NO_DONOR; 2],
+        };
+        FixedAtoms::build(&pool, 8.0);
+    }
+}
