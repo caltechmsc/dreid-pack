@@ -27,6 +27,9 @@ dreid-kernel = "0.4.1"
 dunbrack = "0.1.0"
 rotamer = "0.1.0"
 
+[dev-dependencies]
+approx = "0.5.1"
+
 [lib]
 name = "dreid_pack"
 path = "src/lib.rs"
