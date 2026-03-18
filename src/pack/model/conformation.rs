@@ -46,6 +46,11 @@ impl Conformations {
     /// Retains only the candidates at the given original indices,
     /// compacting in place. The old backing storage is freed.
     pub fn compact(&mut self, alive: &[u16]) {
+        debug_assert!(
+            alive.len() <= u16::MAX as usize,
+            "alive count {} exceeds u16 capacity",
+            alive.len(),
+        );
         let n = self.n_atoms as usize;
         let mut buf = Vec::with_capacity(alive.len() * n);
         for &orig in alive {
