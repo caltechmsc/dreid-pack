@@ -412,4 +412,16 @@ mod tests {
         let got = query_payloads(&g, v(2.0, 0.0, 0.0), 1.5);
         assert_eq!(got, vec![1, 2, 3]);
     }
+
+    #[test]
+    #[should_panic]
+    fn build_panics_on_zero_cell_size() {
+        SpatialGrid::<u32>::build(std::iter::empty(), 0.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn build_panics_on_negative_cell_size() {
+        SpatialGrid::<u32>::build(std::iter::empty(), -1.0);
+    }
 }
