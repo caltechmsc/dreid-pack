@@ -226,7 +226,6 @@ struct QueryIter<'a, T> {
 impl<T: Copy> Iterator for QueryIter<'_, T> {
     type Item = (Vec3, T);
 
-    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.item_idx != SENTINEL {
