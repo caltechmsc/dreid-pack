@@ -261,3 +261,150 @@ impl<T: Copy> Iterator for QueryIter<'_, T> {
 }
 
 impl<T: Copy> std::iter::FusedIterator for QueryIter<'_, T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3 { x, y, z }
+    }
+
+    fn query_payloads(grid: &SpatialGrid<u32>, center: Vec3, radius: f32) -> Vec<u32> {
+        let mut out: Vec<u32> = grid.query(center, radius).map(|(_, p)| p).collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn empty_grid_has_zero_len() {
+        let g = SpatialGrid::<u32>::build(std::iter::empty(), 5.0);
+        assert!(g.is_empty());
+        assert_eq!(g.len(), 0);
+    }
+
+    #[test]
+    fn len_matches_item_count() {
+        let items: Vec<_> = (0u32..10).map(|i| (v(i as f32, 0.0, 0.0), i)).collect();
+        let g = SpatialGrid::build(items, 2.0);
+        assert_eq!(g.len(), 10);
+        assert!(!g.is_empty());
+    }
+
+    #[test]
+    fn empty_grid_returns_nothing() {
+        let g = SpatialGrid::<u32>::build(std::iter::empty(), 5.0);
+        assert_eq!(g.query(v(0.0, 0.0, 0.0), 100.0).count(), 0);
+    }
+
+    #[test]
+    fn single_item_in_range() {
+        let g = SpatialGrid::build([(v(1.0, 0.0, 0.0), 42u32)], 5.0);
+        let res: Vec<_> = g.query(v(0.0, 0.0, 0.0), 2.0).collect();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].1, 42);
+    }
+
+    #[test]
+    fn single_item_out_of_range() {
+        let g = SpatialGrid::build([(v(10.0, 0.0, 0.0), 1u32)], 5.0);
+        assert_eq!(g.query(v(0.0, 0.0, 0.0), 2.0).count(), 0);
+    }
+
+    #[test]
+    fn item_at_exact_radius_is_included() {
+        let g = SpatialGrid::build([(v(3.0, 4.0, 0.0), 7u32)], 5.0);
+        assert_eq!(g.query(v(0.0, 0.0, 0.0), 5.0).count(), 1);
+    }
+
+    #[test]
+    fn item_just_outside_radius_is_excluded() {
+        let g = SpatialGrid::build([(v(3.0, 4.0, 0.0), 7u32)], 5.0);
+        assert_eq!(g.query(v(0.0, 0.0, 0.0), 4.999).count(), 0);
+    }
+
+    #[test]
+    fn partial_hit_returns_correct_subset() {
+        let items = vec![
+            (v(1.0, 0.0, 0.0), 1u32),
+            (v(5.0, 0.0, 0.0), 2u32),
+            (v(6.0, 0.0, 0.0), 3u32),
+            (v(0.0, 0.0, 0.0), 4u32),
+        ];
+        let g = SpatialGrid::build(items, 5.0);
+        assert_eq!(query_payloads(&g, v(0.0, 0.0, 0.0), 5.0), vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn all_items_found_with_large_radius() {
+        let items: Vec<_> = (0u32..50).map(|i| (v(i as f32, 0.0, 0.0), i)).collect();
+        let g = SpatialGrid::build(items, 10.0);
+        let got = query_payloads(&g, v(25.0, 0.0, 0.0), 1_000.0);
+        let expected: Vec<u32> = (0..50).collect();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn items_across_many_cells_all_reachable() {
+        let items: Vec<_> = (0u32..27)
+            .map(|i| {
+                let x = (i % 3) as f32 * 10.0;
+                let y = ((i / 3) % 3) as f32 * 10.0;
+                let z = (i / 9) as f32 * 10.0;
+                (v(x, y, z), i)
+            })
+            .collect();
+        let g = SpatialGrid::build(items, 5.0);
+
+        let result = query_payloads(&g, v(10.0, 10.0, 10.0), 15.0);
+        assert!(result.contains(&13));
+        assert!(!result.contains(&0));
+    }
+
+    #[test]
+    fn query_center_outside_grid_still_finds_items() {
+        let g = SpatialGrid::build([(v(5.0, 5.0, 5.0), 99u32)], 5.0);
+        let res: Vec<_> = g.query(v(-100.0, -100.0, -100.0), 200.0).collect();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].1, 99);
+    }
+
+    #[test]
+    fn no_duplicates_in_results() {
+        let items = vec![(v(0.0, 0.0, 0.0), 1u32), (v(0.1, 0.0, 0.0), 2u32)];
+        let g = SpatialGrid::build(items, 1.0);
+        let results: Vec<u32> = g.query(v(0.0, 0.0, 0.0), 0.5).map(|(_, v)| v).collect();
+        let unique: std::collections::HashSet<u32> = results.iter().copied().collect();
+        assert_eq!(results.len(), unique.len());
+    }
+
+    #[test]
+    fn fused_iterator_returns_none_repeatedly() {
+        let g = SpatialGrid::build([(v(0.0, 0.0, 0.0), 1u32)], 1.0);
+        let mut it = g.query(v(100.0, 0.0, 0.0), 0.1);
+        assert!(it.next().is_none());
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn works_with_u16_payload() {
+        let g = SpatialGrid::build([(v(0.0, 0.0, 0.0), 7u16)], 1.0);
+        let res: Vec<u16> = g.query(v(0.0, 0.0, 0.0), 1.0).map(|(_, v)| v).collect();
+        assert_eq!(res, vec![7u16]);
+    }
+
+    #[test]
+    fn atom_at_aabb_maximum_is_stored_and_queryable() {
+        let g = SpatialGrid::build([(v(0.0, 0.0, 0.0), 0u32), (v(10.0, 10.0, 10.0), 1u32)], 5.0);
+        assert_eq!(g.len(), 2);
+        assert_eq!(g.query(v(10.0, 10.0, 10.0), 0.1).count(), 1);
+    }
+
+    #[test]
+    fn all_items_collinear_single_axis() {
+        let items: Vec<_> = (0u32..5).map(|i| (v(i as f32, 0.0, 0.0), i)).collect();
+        let g = SpatialGrid::build(items, 1.5);
+        let got = query_payloads(&g, v(2.0, 0.0, 0.0), 1.5);
+        assert_eq!(got, vec![1, 2, 3]);
+    }
+}
