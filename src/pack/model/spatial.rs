@@ -90,9 +90,7 @@ impl<T: Copy> SpatialGrid<T> {
         let total_indexed = offsets[num_cells] as usize;
         let mut indices = vec![0u32; total_indexed];
         let mut cursor = counts;
-        for c in 0..num_cells {
-            cursor[c] = offsets[c];
-        }
+        cursor[..num_cells].copy_from_slice(&offsets[..num_cells]);
         for (i, &(pos, _)) in items.iter().enumerate() {
             if let Some(ci) = cell_index_of(pos, min, cell_size, dims) {
                 indices[cursor[ci] as usize] = i as u32;
