@@ -3,7 +3,8 @@
 /// An edge `(a, b)` with `a < b` means slots `a` and `b` have potential
 /// non-zero pair energy.
 pub struct ContactGraph {
-    adj: Vec<Vec<u32>>,
+    adj_offsets: Vec<u32>,
+    adj_list: Vec<u32>,
     edges: Vec<(u32, u32)>,
 }
 
@@ -38,18 +39,40 @@ impl ContactGraph {
             "edge slot index out of bounds for n_slots={n_slots}",
         );
 
-        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); n_slots];
+        let mut degree = vec![0u32; n_slots];
         for &(a, b) in &edges {
-            adj[a as usize].push(b);
-            adj[b as usize].push(a);
+            degree[a as usize] += 1;
+            degree[b as usize] += 1;
         }
 
-        Self { adj, edges }
+        let mut adj_offsets = vec![0u32; n_slots + 1];
+        for s in 0..n_slots {
+            adj_offsets[s + 1] = adj_offsets[s] + degree[s];
+        }
+
+        let total_neighbors = adj_offsets[n_slots] as usize;
+        let mut adj_list = vec![0u32; total_neighbors];
+        let mut cursor = degree;
+        for s in 0..n_slots {
+            cursor[s] = adj_offsets[s];
+        }
+        for &(a, b) in &edges {
+            adj_list[cursor[a as usize] as usize] = b;
+            cursor[a as usize] += 1;
+            adj_list[cursor[b as usize] as usize] = a;
+            cursor[b as usize] += 1;
+        }
+
+        Self {
+            adj_offsets,
+            adj_list,
+            edges,
+        }
     }
 
     /// Number of packable slots.
     pub fn n_slots(&self) -> usize {
-        self.adj.len()
+        self.adj_offsets.len() - 1
     }
 
     /// Number of contact edges.
@@ -60,11 +83,11 @@ impl ContactGraph {
     /// Returns slot indices that contact slot `s`.
     pub fn neighbors(&self, s: usize) -> &[u32] {
         debug_assert!(
-            s < self.adj.len(),
+            s < self.n_slots(),
             "slot {s} out of bounds (n_slots={})",
-            self.adj.len(),
+            self.n_slots(),
         );
-        &self.adj[s]
+        &self.adj_list[self.adj_offsets[s] as usize..self.adj_offsets[s + 1] as usize]
     }
 
     /// Returns the list of edges as `(a, b)` pairs with `a < b`,
