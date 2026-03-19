@@ -342,6 +342,43 @@ mod tests {
         total
     }
 
+    fn check_running_intersection(tree: &JunctionTree) {
+        let n = tree.n_bags();
+        for v in 0..n as u32 {
+            let bag_ids: Vec<usize> = tree
+                .bags()
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.elim() == v || b.separator().contains(&v))
+                .map(|(i, _)| i)
+                .collect();
+            if bag_ids.len() <= 1 {
+                continue;
+            }
+            let mut visited = vec![false; n];
+            let mut stack = vec![bag_ids[0]];
+            visited[bag_ids[0]] = true;
+            while let Some(bi) = stack.pop() {
+                let b = &tree.bags()[bi];
+                if let Some(p) = b.parent() {
+                    let p = p as usize;
+                    if !visited[p] && bag_ids.contains(&p) {
+                        visited[p] = true;
+                        stack.push(p);
+                    }
+                }
+                for (ci, cb) in tree.bags().iter().enumerate() {
+                    if cb.parent() == Some(bi as u16) && !visited[ci] && bag_ids.contains(&ci) {
+                        visited[ci] = true;
+                        stack.push(ci);
+                    }
+                }
+            }
+            let reachable = bag_ids.iter().filter(|&&i| visited[i]).count();
+            assert_eq!(reachable, bag_ids.len(), "vertex {v}: bags not connected");
+        }
+    }
+
     #[test]
     fn empty_graph_yields_empty_tree() {
         let tree = JunctionTree::build(&[], 5).unwrap();
@@ -539,80 +576,12 @@ mod tests {
 
     #[test]
     fn running_intersection_holds() {
-        let tree = JunctionTree::build(&cycle(6), 5).unwrap();
-        let n = tree.n_bags();
-        for v in 0..n as u32 {
-            let bag_ids: Vec<usize> = tree
-                .bags()
-                .iter()
-                .enumerate()
-                .filter(|(_, bag)| bag.elim() == v || bag.separator().contains(&v))
-                .map(|(i, _)| i)
-                .collect();
-            if bag_ids.len() <= 1 {
-                continue;
-            }
-            let mut visited = vec![false; n];
-            let mut stack = vec![bag_ids[0]];
-            visited[bag_ids[0]] = true;
-            while let Some(bi) = stack.pop() {
-                let bag = &tree.bags()[bi];
-                if let Some(p) = bag.parent() {
-                    let p = p as usize;
-                    if !visited[p] && bag_ids.contains(&p) {
-                        visited[p] = true;
-                        stack.push(p);
-                    }
-                }
-                for (ci, cb) in tree.bags().iter().enumerate() {
-                    if cb.parent() == Some(bi as u16) && !visited[ci] && bag_ids.contains(&ci) {
-                        visited[ci] = true;
-                        stack.push(ci);
-                    }
-                }
-            }
-            let reachable = bag_ids.iter().filter(|&&i| visited[i]).count();
-            assert_eq!(reachable, bag_ids.len(), "vertex {v}: bags not connected");
-        }
+        check_running_intersection(&JunctionTree::build(&cycle(6), 5).unwrap());
     }
 
     #[test]
     fn running_intersection_holds_on_k5() {
-        let tree = JunctionTree::build(&complete(5), 5).unwrap();
-        let n = tree.n_bags();
-        for v in 0..n as u32 {
-            let bag_ids: Vec<usize> = tree
-                .bags()
-                .iter()
-                .enumerate()
-                .filter(|(_, bag)| bag.elim() == v || bag.separator().contains(&v))
-                .map(|(i, _)| i)
-                .collect();
-            if bag_ids.len() <= 1 {
-                continue;
-            }
-            let mut visited = vec![false; n];
-            let mut stack = vec![bag_ids[0]];
-            visited[bag_ids[0]] = true;
-            while let Some(bi) = stack.pop() {
-                let bag = &tree.bags()[bi];
-                if let Some(p) = bag.parent() {
-                    let p = p as usize;
-                    if !visited[p] && bag_ids.contains(&p) {
-                        visited[p] = true;
-                        stack.push(p);
-                    }
-                }
-                for (ci, cb) in tree.bags().iter().enumerate() {
-                    if cb.parent() == Some(bi as u16) && !visited[ci] && bag_ids.contains(&ci) {
-                        visited[ci] = true;
-                        stack.push(ci);
-                    }
-                }
-            }
-            let reachable = bag_ids.iter().filter(|&&i| visited[i]).count();
-            assert_eq!(reachable, bag_ids.len(), "vertex {v}: bags not connected");
-        }
+        check_running_intersection(&JunctionTree::build(&complete(5), 5).unwrap());
     }
 
     #[test]
