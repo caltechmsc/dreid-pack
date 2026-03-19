@@ -294,3 +294,351 @@ fn assert_connected(matrix: &[bool], n: usize) {
     }
     debug_assert!(visited.iter().all(|&v| v), "input graph is not connected");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn adj_from_edges(n: usize, edges: &[(u32, u32)]) -> Vec<Vec<u32>> {
+        let mut adj = vec![Vec::new(); n];
+        for &(a, b) in edges {
+            adj[a as usize].push(b);
+            adj[b as usize].push(a);
+        }
+        adj
+    }
+
+    fn complete(n: usize) -> Vec<Vec<u32>> {
+        let mut adj = vec![Vec::new(); n];
+        for i in 0..n {
+            for j in 0..n {
+                if i != j {
+                    adj[i].push(j as u32);
+                }
+            }
+        }
+        adj
+    }
+
+    fn path(n: usize) -> Vec<Vec<u32>> {
+        let edges: Vec<(u32, u32)> = (0..n as u32 - 1).map(|i| (i, i + 1)).collect();
+        adj_from_edges(n, &edges)
+    }
+
+    fn cycle(n: usize) -> Vec<Vec<u32>> {
+        let mut edges: Vec<(u32, u32)> = (0..n as u32 - 1).map(|i| (i, i + 1)).collect();
+        edges.push((n as u32 - 1, 0));
+        adj_from_edges(n, &edges)
+    }
+
+    fn star(n: usize) -> Vec<Vec<u32>> {
+        let edges: Vec<(u32, u32)> = (1..n as u32).map(|i| (0, i)).collect();
+        adj_from_edges(n, &edges)
+    }
+
+    fn bag_total(bag: &Bag) -> Vec<u32> {
+        let mut total: Vec<u32> = bag.separator().to_vec();
+        total.push(bag.elim());
+        total
+    }
+
+    #[test]
+    fn empty_graph_yields_empty_tree() {
+        let tree = JunctionTree::build(&[], 5).unwrap();
+        assert_eq!(tree.n_bags(), 0);
+        assert_eq!(tree.width(), 0);
+    }
+
+    #[test]
+    fn single_vertex_has_width_zero() {
+        let tree = JunctionTree::build(&[vec![]], 5).unwrap();
+        assert_eq!(tree.n_bags(), 1);
+        assert_eq!(tree.width(), 0);
+        assert_eq!(tree.bags()[0].elim(), 0);
+        assert!(tree.bags()[0].separator().is_empty());
+    }
+
+    #[test]
+    fn two_vertices_have_width_one() {
+        let tree = JunctionTree::build(&adj_from_edges(2, &[(0, 1)]), 5).unwrap();
+        assert_eq!(tree.n_bags(), 2);
+        assert_eq!(tree.width(), 1);
+    }
+
+    #[test]
+    fn path_of_five_has_width_one() {
+        let tree = JunctionTree::build(&path(5), 5).unwrap();
+        assert_eq!(tree.width(), 1);
+    }
+
+    #[test]
+    fn triangle_has_width_two() {
+        let tree = JunctionTree::build(&complete(3), 5).unwrap();
+        assert_eq!(tree.width(), 2);
+    }
+
+    #[test]
+    fn cycle_of_four_has_width_two() {
+        let tree = JunctionTree::build(&cycle(4), 5).unwrap();
+        assert_eq!(tree.width(), 2);
+    }
+
+    #[test]
+    fn cycle_of_six_has_width_two() {
+        let tree = JunctionTree::build(&cycle(6), 5).unwrap();
+        assert_eq!(tree.width(), 2);
+    }
+
+    #[test]
+    fn complete_k4_has_width_three() {
+        let tree = JunctionTree::build(&complete(4), 5).unwrap();
+        assert_eq!(tree.width(), 3);
+    }
+
+    #[test]
+    fn complete_k5_has_width_four() {
+        let tree = JunctionTree::build(&complete(5), 5).unwrap();
+        assert_eq!(tree.width(), 4);
+    }
+
+    #[test]
+    fn complete_k6_has_width_five() {
+        let tree = JunctionTree::build(&complete(6), 5).unwrap();
+        assert_eq!(tree.width(), 5);
+    }
+
+    #[test]
+    fn complete_k7_returns_none() {
+        assert!(JunctionTree::build(&complete(7), 5).is_none());
+    }
+
+    #[test]
+    fn star_of_five_has_width_one() {
+        let tree = JunctionTree::build(&star(5), 5).unwrap();
+        assert_eq!(tree.width(), 1);
+    }
+
+    #[test]
+    fn stricter_max_width_rejects_earlier() {
+        assert!(JunctionTree::build(&complete(5), 4).is_some());
+        assert!(JunctionTree::build(&complete(6), 4).is_none());
+    }
+
+    #[test]
+    #[should_panic]
+    fn max_width_above_five_panics() {
+        let _ = JunctionTree::build(&[], 6);
+    }
+
+    #[test]
+    fn root_is_last_bag() {
+        let tree = JunctionTree::build(&path(4), 5).unwrap();
+        assert_eq!(tree.root() as usize, tree.n_bags() - 1);
+    }
+
+    #[test]
+    fn root_has_no_parent_and_empty_separator() {
+        let tree = JunctionTree::build(&complete(4), 5).unwrap();
+        let root = &tree.bags()[tree.root() as usize];
+        assert!(root.parent().is_none());
+        assert!(root.separator().is_empty());
+    }
+
+    #[test]
+    fn non_root_bags_have_parent() {
+        let tree = JunctionTree::build(&cycle(5), 5).unwrap();
+        for (i, bag) in tree.bags().iter().enumerate() {
+            if i != tree.root() as usize {
+                assert!(bag.parent().is_some(), "bag {i} has no parent");
+            }
+        }
+    }
+
+    #[test]
+    fn parent_index_exceeds_self() {
+        let tree = JunctionTree::build(&cycle(6), 5).unwrap();
+        for (i, bag) in tree.bags().iter().enumerate() {
+            if let Some(p) = bag.parent() {
+                assert!((p as usize) > i, "bag {i} parent {p} not greater than self",);
+            }
+        }
+    }
+
+    #[test]
+    fn all_vertices_eliminated_exactly_once() {
+        let tree = JunctionTree::build(&complete(5), 5).unwrap();
+        let mut seen = vec![false; 5];
+        for bag in tree.bags() {
+            let v = bag.elim() as usize;
+            assert!(!seen[v], "vertex {v} eliminated twice");
+            seen[v] = true;
+        }
+        assert!(seen.iter().all(|&s| s));
+    }
+
+    #[test]
+    fn separators_are_ascending() {
+        let tree = JunctionTree::build(&complete(5), 5).unwrap();
+        for bag in tree.bags() {
+            let sep = bag.separator();
+            for w in sep.windows(2) {
+                assert!(w[0] < w[1], "separator not ascending: {:?}", sep);
+            }
+        }
+    }
+
+    #[test]
+    fn separator_subset_of_parent_total() {
+        let tree = JunctionTree::build(&cycle(5), 5).unwrap();
+        for bag in tree.bags() {
+            if let Some(p) = bag.parent() {
+                let parent = &tree.bags()[p as usize];
+                for &v in bag.separator() {
+                    assert!(
+                        parent.separator().contains(&v) || parent.elim() == v,
+                        "separator vertex {v} not in parent bag",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn all_edges_covered_by_some_bag() {
+        let adj = cycle(6);
+        let tree = JunctionTree::build(&adj, 5).unwrap();
+        for (u, nbrs) in adj.iter().enumerate() {
+            for &v in nbrs {
+                if (u as u32) < v {
+                    let covered = tree.bags().iter().any(|bag| {
+                        let t = bag_total(bag);
+                        t.contains(&(u as u32)) && t.contains(&v)
+                    });
+                    assert!(covered, "edge ({u}, {v}) not covered");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn all_edges_covered_in_k5() {
+        let adj = complete(5);
+        let tree = JunctionTree::build(&adj, 5).unwrap();
+        for (u, nbrs) in adj.iter().enumerate() {
+            for &v in nbrs {
+                if (u as u32) < v {
+                    let covered = tree.bags().iter().any(|bag| {
+                        let t = bag_total(bag);
+                        t.contains(&(u as u32)) && t.contains(&v)
+                    });
+                    assert!(covered, "edge ({u}, {v}) not covered");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn running_intersection_holds() {
+        let tree = JunctionTree::build(&cycle(6), 5).unwrap();
+        let n = tree.n_bags();
+        for v in 0..n as u32 {
+            let bag_ids: Vec<usize> = tree
+                .bags()
+                .iter()
+                .enumerate()
+                .filter(|(_, bag)| bag.elim() == v || bag.separator().contains(&v))
+                .map(|(i, _)| i)
+                .collect();
+            if bag_ids.len() <= 1 {
+                continue;
+            }
+            let mut visited = vec![false; n];
+            let mut stack = vec![bag_ids[0]];
+            visited[bag_ids[0]] = true;
+            while let Some(bi) = stack.pop() {
+                let bag = &tree.bags()[bi];
+                if let Some(p) = bag.parent() {
+                    let p = p as usize;
+                    if !visited[p] && bag_ids.contains(&p) {
+                        visited[p] = true;
+                        stack.push(p);
+                    }
+                }
+                for (ci, cb) in tree.bags().iter().enumerate() {
+                    if cb.parent() == Some(bi as u16) && !visited[ci] && bag_ids.contains(&ci) {
+                        visited[ci] = true;
+                        stack.push(ci);
+                    }
+                }
+            }
+            let reachable = bag_ids.iter().filter(|&&i| visited[i]).count();
+            assert_eq!(reachable, bag_ids.len(), "vertex {v}: bags not connected");
+        }
+    }
+
+    #[test]
+    fn running_intersection_holds_on_k5() {
+        let tree = JunctionTree::build(&complete(5), 5).unwrap();
+        let n = tree.n_bags();
+        for v in 0..n as u32 {
+            let bag_ids: Vec<usize> = tree
+                .bags()
+                .iter()
+                .enumerate()
+                .filter(|(_, bag)| bag.elim() == v || bag.separator().contains(&v))
+                .map(|(i, _)| i)
+                .collect();
+            if bag_ids.len() <= 1 {
+                continue;
+            }
+            let mut visited = vec![false; n];
+            let mut stack = vec![bag_ids[0]];
+            visited[bag_ids[0]] = true;
+            while let Some(bi) = stack.pop() {
+                let bag = &tree.bags()[bi];
+                if let Some(p) = bag.parent() {
+                    let p = p as usize;
+                    if !visited[p] && bag_ids.contains(&p) {
+                        visited[p] = true;
+                        stack.push(p);
+                    }
+                }
+                for (ci, cb) in tree.bags().iter().enumerate() {
+                    if cb.parent() == Some(bi as u16) && !visited[ci] && bag_ids.contains(&ci) {
+                        visited[ci] = true;
+                        stack.push(ci);
+                    }
+                }
+            }
+            let reachable = bag_ids.iter().filter(|&&i| visited[i]).count();
+            assert_eq!(reachable, bag_ids.len(), "vertex {v}: bags not connected");
+        }
+    }
+
+    #[test]
+    fn chordal_graph_gets_optimal_width() {
+        let adj = adj_from_edges(4, &[(0, 1), (1, 2), (2, 3), (3, 0), (0, 2)]);
+        let tree = JunctionTree::build(&adj, 5).unwrap();
+        assert_eq!(tree.width(), 2);
+    }
+
+    #[test]
+    fn non_chordal_cycle_four_gets_optimal_width() {
+        let tree = JunctionTree::build(&cycle(4), 5).unwrap();
+        assert_eq!(tree.width(), 2);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn build_panics_on_out_of_bounds_neighbor() {
+        let _ = JunctionTree::build(&[vec![5]], 5);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn build_panics_on_disconnected_graph() {
+        let _ = JunctionTree::build(&[vec![], vec![]], 5);
+    }
+}
