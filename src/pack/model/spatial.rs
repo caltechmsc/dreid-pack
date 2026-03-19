@@ -119,6 +119,10 @@ impl<T: Copy> SpatialGrid<T> {
     /// Exact sphere query: yields every `(position, payload)` with
     /// `dist(position, center) ≤ radius`.
     pub fn query(&self, center: Vec3, radius: f32) -> impl Iterator<Item = (Vec3, T)> + '_ {
+        debug_assert!(
+            radius >= 0.0,
+            "query radius must be non-negative, got {radius}"
+        );
         let r2 = radius * radius;
 
         if self.items.is_empty() {
@@ -448,5 +452,13 @@ mod tests {
             ],
             1.0,
         );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn query_panics_on_negative_radius() {
+        let g = SpatialGrid::build([(v(0.0, 0.0, 0.0), 0u32)], 1.0);
+        let _ = g.query(v(0.0, 0.0, 0.0), -1.0).count();
     }
 }
