@@ -128,10 +128,12 @@ impl Residue {
             MAX_SIDECHAIN_ATOMS
         );
         self.sidechain.clear();
-        // SAFETY: coords.len() ≤ MAX_SIDECHAIN_ATOMS = capacity (verified by debug_assert).
-        for &c in coords {
-            unsafe { self.sidechain.push_unchecked(c) };
-        }
+        // SAFETY: coords.len() ≤ MAX_SIDECHAIN_ATOMS = capacity (guaranteed by debug_assert above).
+        unsafe {
+            self.sidechain
+                .try_extend_from_slice(coords)
+                .unwrap_unchecked()
+        };
     }
 }
 
