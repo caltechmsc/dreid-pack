@@ -52,7 +52,15 @@ pub struct SidechainAtoms<'a> {
 }
 
 impl Residue {
+    /// Constructs a packable residue from backbone geometry and sidechain atoms.
+    ///
     /// Returns `None` if `res_type` is not packable (Gly, Ala).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `atoms.coords` exceeds 18 atoms (max sidechain size), or if
+    /// `atoms.types`, `atoms.charges`, or `atoms.donor_of_h` differ in length
+    /// from `atoms.coords`.
     pub fn new(
         res_type: ResidueType,
         anchor: [Vec3; 3],
@@ -64,10 +72,10 @@ impl Residue {
             return None;
         }
         let n = atoms.coords.len();
-        debug_assert!(n <= MAX_SIDECHAIN_ATOMS, "too many sidechain atoms: {n}");
-        debug_assert_eq!(atoms.types.len(), n, "types/coords length mismatch");
-        debug_assert_eq!(atoms.charges.len(), n, "charges/coords length mismatch");
-        debug_assert_eq!(
+        assert!(n <= MAX_SIDECHAIN_ATOMS, "too many sidechain atoms: {n}");
+        assert_eq!(atoms.types.len(), n, "types/coords length mismatch");
+        assert_eq!(atoms.charges.len(), n, "charges/coords length mismatch");
+        assert_eq!(
             atoms.donor_of_h.len(),
             n,
             "donor_of_h/coords length mismatch"
@@ -418,7 +426,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn residue_new_panics_when_coords_exceed_max_sidechain_atoms() {
         let anchor = [v(0.0, 0.0, 0.0); 3];
@@ -442,7 +449,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn residue_new_panics_on_types_length_mismatch() {
         let anchor = [v(0.0, 0.0, 0.0); 3];
@@ -465,7 +471,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn residue_new_panics_on_charges_length_mismatch() {
         let anchor = [v(0.0, 0.0, 0.0); 3];
@@ -488,7 +493,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn residue_new_panics_on_donor_of_h_length_mismatch() {
         let anchor = [v(0.0, 0.0, 0.0); 3];
