@@ -118,6 +118,7 @@ impl Residue {
     }
 
     /// Overwrites the stored sidechain coordinates (internal use only).
+    #[allow(dead_code)] // FIXME: Remove allow once core packing algorithm is implemented and calls this method.
     #[inline]
     pub(crate) fn set_sidechain(&mut self, coords: &[Vec3]) {
         debug_assert!(
