@@ -29,16 +29,18 @@ impl<'a> FixedAtoms<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if atom count exceeds `u32::MAX`, or if `vdw_cutoff ≤ 0`.
+    /// Panics if atom count exceeds `u32::MAX`, if `vdw_cutoff ≤ 0`, or if
+    /// `pool.types`, `pool.charges`, or `pool.donor_for_h` differ in length
+    /// from `pool.positions`.
     pub fn build(pool: &'a FixedAtomPool, vdw_cutoff: f32) -> Self {
         let n = pool.positions.len();
         assert!(
             n <= u32::MAX as usize,
             "atom count {n} exceeds u32 capacity"
         );
-        debug_assert_eq!(pool.types.len(), n, "types/positions length mismatch");
-        debug_assert_eq!(pool.charges.len(), n, "charges/positions length mismatch");
-        debug_assert_eq!(
+        assert_eq!(pool.types.len(), n, "types/positions length mismatch");
+        assert_eq!(pool.charges.len(), n, "charges/positions length mismatch");
+        assert_eq!(
             pool.donor_for_h.len(),
             n,
             "donor_for_h/positions length mismatch"
@@ -235,7 +237,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn build_panics_on_types_length_mismatch() {
         let pool = FixedAtomPool {
@@ -248,7 +249,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn build_panics_on_charges_length_mismatch() {
         let pool = FixedAtomPool {
@@ -261,7 +261,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn build_panics_on_donor_for_h_length_mismatch() {
         let pool = FixedAtomPool {
