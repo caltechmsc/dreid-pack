@@ -1,8 +1,5 @@
 use crate::model::types::Vec3;
 
-/// Sentinel marking the end of a linked list.
-const SENTINEL: u32 = u32::MAX;
-
 /// Uniform cubic spatial grid.
 ///
 /// Build once with [`SpatialGrid::build`]; query repeatedly with
@@ -11,8 +8,8 @@ pub struct SpatialGrid<T> {
     cell_size: f32,
     origin: Vec3,
     dims: [usize; 3],
-    head: Vec<u32>,
-    next: Vec<u32>,
+    offsets: Vec<u32>,
+    indices: Vec<u32>,
     items: Vec<(Vec3, T)>,
 }
 
@@ -39,28 +36,16 @@ impl<T: Copy> SpatialGrid<T> {
         if items.is_empty() {
             return Self {
                 cell_size,
-                origin: Vec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
+                origin: Vec3::zero(),
                 dims: [0, 0, 0],
-                head: Vec::new(),
-                next: Vec::new(),
+                offsets: vec![0],
+                indices: Vec::new(),
                 items: Vec::new(),
             };
         }
 
-        let mut min = Vec3 {
-            x: f32::MAX,
-            y: f32::MAX,
-            z: f32::MAX,
-        };
-        let mut max = Vec3 {
-            x: f32::MIN,
-            y: f32::MIN,
-            z: f32::MIN,
-        };
+        let mut min = Vec3::splat(f32::MAX);
+        let mut max = Vec3::splat(f32::MIN);
         for &(pos, _) in &items {
             if pos.x < min.x {
                 min.x = pos.x;
@@ -88,29 +73,40 @@ impl<T: Copy> SpatialGrid<T> {
             (((max.y + eps - min.y) / cell_size).ceil() as usize).max(1),
             (((max.z + eps - min.z) / cell_size).ceil() as usize).max(1),
         ];
-
         let num_cells = dims[0] * dims[1] * dims[2];
-        let num_items = items.len();
 
-        let mut head = vec![SENTINEL; num_cells];
-        let mut next = vec![SENTINEL; num_items];
-        let mut stored: Vec<(Vec3, T)> = Vec::with_capacity(num_items);
-
-        for (i, (pos, payload)) in items.into_iter().enumerate() {
+        let mut counts = vec![0u32; num_cells];
+        for &(pos, _) in &items {
             if let Some(ci) = cell_index_of(pos, min, cell_size, dims) {
-                next[i] = head[ci];
-                head[ci] = i as u32;
+                counts[ci] += 1;
             }
-            stored.push((pos, payload));
+        }
+
+        let mut offsets = vec![0u32; num_cells + 1];
+        for c in 0..num_cells {
+            offsets[c + 1] = offsets[c] + counts[c];
+        }
+
+        let total_indexed = offsets[num_cells] as usize;
+        let mut indices = vec![0u32; total_indexed];
+        let mut cursor = counts;
+        for c in 0..num_cells {
+            cursor[c] = offsets[c];
+        }
+        for (i, &(pos, _)) in items.iter().enumerate() {
+            if let Some(ci) = cell_index_of(pos, min, cell_size, dims) {
+                indices[cursor[ci] as usize] = i as u32;
+                cursor[ci] += 1;
+            }
         }
 
         Self {
             cell_size,
             origin: min,
             dims,
-            head,
-            next,
-            items: stored,
+            offsets,
+            indices,
+            items,
         }
     }
 
@@ -119,14 +115,23 @@ impl<T: Copy> SpatialGrid<T> {
     pub fn query(&self, center: Vec3, radius: f32) -> impl Iterator<Item = (Vec3, T)> + '_ {
         let r2 = radius * radius;
 
-        let (lo, hi, init_item) = if self.items.is_empty() {
-            ([0usize; 3], [0usize; 3], SENTINEL)
-        } else {
-            let (lo, hi) = self.cell_range(center, radius);
-            let ci = lo[0] + lo[1] * self.dims[0] + lo[2] * self.dims[0] * self.dims[1];
-            (lo, hi, self.head[ci])
-        };
+        if self.items.is_empty() {
+            return QueryIter {
+                grid: self,
+                lo: [0; 3],
+                hi: [0; 3],
+                cx: 0,
+                cy: 0,
+                cz: 1,
+                cell_pos: 0,
+                cell_end: 0,
+                center,
+                radius_sq: r2,
+            };
+        }
 
+        let (lo, hi) = self.cell_range(center, radius);
+        let first_ci = lo[0] + lo[1] * self.dims[0] + lo[2] * self.dims[0] * self.dims[1];
         QueryIter {
             grid: self,
             lo,
@@ -134,7 +139,8 @@ impl<T: Copy> SpatialGrid<T> {
             cx: lo[0],
             cy: lo[1],
             cz: lo[2],
-            item_idx: init_item,
+            cell_pos: self.offsets[first_ci],
+            cell_end: self.offsets[first_ci + 1],
             center,
             radius_sq: r2,
         }
@@ -224,7 +230,8 @@ struct QueryIter<'a, T> {
     cx: usize,
     cy: usize,
     cz: usize,
-    item_idx: u32,
+    cell_pos: u32,
+    cell_end: u32,
     center: Vec3,
     radius_sq: f32,
 }
@@ -234,14 +241,13 @@ impl<T: Copy> Iterator for QueryIter<'_, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.item_idx != SENTINEL {
-                let idx = self.item_idx as usize;
-                self.item_idx = self.grid.next[idx];
+            while self.cell_pos < self.cell_end {
+                let idx = self.grid.indices[self.cell_pos as usize] as usize;
+                self.cell_pos += 1;
                 let (pos, val) = self.grid.items[idx];
                 if pos.dist_sq(self.center) <= self.radius_sq {
                     return Some((pos, val));
                 }
-                continue;
             }
 
             self.cx += 1;
@@ -260,7 +266,8 @@ impl<T: Copy> Iterator for QueryIter<'_, T> {
             let ci = self.cx
                 + self.cy * self.grid.dims[0]
                 + self.cz * self.grid.dims[0] * self.grid.dims[1];
-            self.item_idx = self.grid.head[ci];
+            self.cell_pos = self.grid.offsets[ci];
+            self.cell_end = self.grid.offsets[ci + 1];
         }
     }
 }
