@@ -53,9 +53,7 @@ impl ContactGraph {
         let total_neighbors = adj_offsets[n_slots] as usize;
         let mut adj_list = vec![0u32; total_neighbors];
         let mut cursor = degree;
-        for s in 0..n_slots {
-            cursor[s] = adj_offsets[s];
-        }
+        cursor[..n_slots].copy_from_slice(&adj_offsets[..n_slots]);
         for &(a, b) in &edges {
             adj_list[cursor[a as usize] as usize] = b;
             cursor[a as usize] += 1;
