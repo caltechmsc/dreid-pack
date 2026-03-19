@@ -102,3 +102,67 @@ impl SelfEnergyTable {
         alive_all
     }
 }
+
+/// Pair energy for every (edge, candidate_i, candidate_j) triple.
+pub struct PairEnergyTable {
+    data: Vec<f32>,
+    offsets: Vec<usize>,
+    sizes: Vec<(u16, u16)>,
+}
+
+impl PairEnergyTable {
+    /// Creates a zero-filled table with the given per-edge sub-matrix sizes.
+    pub fn new(dims: &[(u16, u16)]) -> Self {
+        let n = dims.len();
+        let mut offsets = vec![0usize; n + 1];
+        for (i, &(ni, nj)) in dims.iter().enumerate() {
+            offsets[i + 1] = offsets[i] + ni as usize * nj as usize;
+        }
+        Self {
+            data: vec![0.0; offsets[n]],
+            offsets,
+            sizes: dims.to_vec(),
+        }
+    }
+
+    /// Number of edges.
+    pub fn n_edges(&self) -> usize {
+        self.sizes.len()
+    }
+
+    /// Sub-matrix dimensions `(n_i, n_j)` for `edge`.
+    pub fn dims(&self, edge: usize) -> (usize, usize) {
+        debug_assert!(
+            edge < self.n_edges(),
+            "edge {edge} out of bounds (n_edges={})",
+            self.n_edges(),
+        );
+        (self.sizes[edge].0 as usize, self.sizes[edge].1 as usize)
+    }
+
+    /// Pair energy for candidates `ri`, `rj` on `edge`.
+    pub fn get(&self, edge: usize, ri: usize, rj: usize) -> f32 {
+        let (ni, nj) = self.dims(edge);
+        debug_assert!(ri < ni, "ri {ri} out of bounds (n_i={ni})");
+        debug_assert!(rj < nj, "rj {rj} out of bounds (n_j={nj})");
+        self.data[self.offsets[edge] + ri * nj + rj]
+    }
+
+    /// Sets pair energy for candidates `ri`, `rj` on `edge`.
+    pub fn set(&mut self, edge: usize, ri: usize, rj: usize, val: f32) {
+        let (ni, nj) = self.dims(edge);
+        debug_assert!(ri < ni, "ri {ri} out of bounds (n_i={ni})");
+        debug_assert!(rj < nj, "rj {rj} out of bounds (n_j={nj})");
+        self.data[self.offsets[edge] + ri * nj + rj] = val;
+    }
+
+    /// Raw sub-matrix slice for `edge` (row-major, length = Ri × Rj).
+    pub fn matrix(&self, edge: usize) -> &[f32] {
+        debug_assert!(
+            edge < self.n_edges(),
+            "edge {edge} out of bounds (n_edges={})",
+            self.n_edges(),
+        );
+        &self.data[self.offsets[edge]..self.offsets[edge + 1]]
+    }
+}
