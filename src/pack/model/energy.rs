@@ -166,3 +166,234 @@ impl PairEnergyTable {
         &self.data[self.offsets[edge]..self.offsets[edge + 1]]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn self_new_empty_has_zero_slots() {
+        let t = SelfEnergyTable::new(&[]);
+        assert_eq!(t.n_slots(), 0);
+    }
+
+    #[test]
+    fn self_n_slots_matches_counts() {
+        let t = SelfEnergyTable::new(&[3, 5, 2]);
+        assert_eq!(t.n_slots(), 3);
+    }
+
+    #[test]
+    fn self_n_candidates_matches_each_count() {
+        let t = SelfEnergyTable::new(&[4, 7, 1]);
+        assert_eq!(t.n_candidates(0), 4);
+        assert_eq!(t.n_candidates(1), 7);
+        assert_eq!(t.n_candidates(2), 1);
+    }
+
+    #[test]
+    fn self_all_entries_zero_after_new() {
+        let t = SelfEnergyTable::new(&[3, 2]);
+        for s in 0..t.n_slots() {
+            for r in 0..t.n_candidates(s) {
+                assert_eq!(t.get(s, r), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn self_set_then_get_round_trips() {
+        let mut t = SelfEnergyTable::new(&[3, 2]);
+        t.set(0, 2, 1.5);
+        t.set(1, 0, -3.0);
+        assert_eq!(t.get(0, 2), 1.5);
+        assert_eq!(t.get(1, 0), -3.0);
+    }
+
+    #[test]
+    fn self_slots_are_independent() {
+        let mut t = SelfEnergyTable::new(&[2, 2]);
+        t.set(0, 0, 99.0);
+        assert_eq!(t.get(1, 0), 0.0);
+    }
+
+    #[test]
+    fn self_is_pruned_false_initially() {
+        let t = SelfEnergyTable::new(&[3]);
+        assert!(!t.is_pruned(0, 0));
+        assert!(!t.is_pruned(0, 2));
+    }
+
+    #[test]
+    fn self_prune_sets_infinity() {
+        let mut t = SelfEnergyTable::new(&[4]);
+        t.prune(0, 1);
+        assert_eq!(t.get(0, 1), f32::INFINITY);
+    }
+
+    #[test]
+    fn self_is_pruned_true_after_prune() {
+        let mut t = SelfEnergyTable::new(&[3]);
+        t.prune(0, 2);
+        assert!(t.is_pruned(0, 2));
+        assert!(!t.is_pruned(0, 0));
+    }
+
+    #[test]
+    fn self_compact_multi_slot() {
+        let mut t = SelfEnergyTable::new(&[4, 3, 2]);
+        t.set(0, 0, 1.0);
+        t.set(0, 2, 3.0);
+        t.prune(0, 1);
+        t.prune(0, 3);
+        t.set(1, 1, 6.0);
+        t.set(1, 2, 7.0);
+        t.prune(1, 0);
+        t.set(2, 0, 8.0);
+        t.set(2, 1, 9.0);
+
+        let alive = t.compact();
+
+        assert_eq!(alive, vec![vec![0, 2], vec![1, 2], vec![0, 1]]);
+        assert_eq!(t.n_candidates(0), 2);
+        assert_eq!(t.n_candidates(1), 2);
+        assert_eq!(t.n_candidates(2), 2);
+        assert_eq!(t.get(0, 0), 1.0);
+        assert_eq!(t.get(0, 1), 3.0);
+        assert_eq!(t.get(1, 0), 6.0);
+        assert_eq!(t.get(1, 1), 7.0);
+        assert_eq!(t.get(2, 0), 8.0);
+        assert_eq!(t.get(2, 1), 9.0);
+    }
+
+    #[test]
+    fn self_compact_identity_when_nothing_pruned() {
+        let mut t = SelfEnergyTable::new(&[3, 2]);
+        t.set(0, 0, 1.0);
+        t.set(0, 1, 2.0);
+        t.set(0, 2, 3.0);
+        t.set(1, 0, 4.0);
+        t.set(1, 1, 5.0);
+
+        let alive = t.compact();
+
+        assert_eq!(alive, vec![vec![0, 1, 2], vec![0, 1]]);
+        assert_eq!(t.n_candidates(0), 3);
+        assert_eq!(t.n_candidates(1), 2);
+        assert_eq!(t.get(0, 1), 2.0);
+        assert_eq!(t.get(1, 0), 4.0);
+    }
+
+    #[test]
+    fn self_compact_all_pruned_yields_zero_candidates() {
+        let mut t = SelfEnergyTable::new(&[2, 1]);
+        t.prune(0, 0);
+        t.prune(0, 1);
+        t.prune(1, 0);
+
+        let alive = t.compact();
+
+        assert_eq!(alive, vec![vec![], vec![]]);
+        assert_eq!(t.n_candidates(0), 0);
+        assert_eq!(t.n_candidates(1), 0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn self_get_panics_slot_out_of_bounds() {
+        let t = SelfEnergyTable::new(&[3]);
+        let _ = t.get(1, 0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn self_get_panics_candidate_out_of_bounds() {
+        let t = SelfEnergyTable::new(&[3]);
+        let _ = t.get(0, 3);
+    }
+
+    #[test]
+    fn pair_new_empty_has_zero_edges() {
+        let t = PairEnergyTable::new(&[]);
+        assert_eq!(t.n_edges(), 0);
+    }
+
+    #[test]
+    fn pair_n_edges_matches_dims() {
+        let t = PairEnergyTable::new(&[(3, 2), (4, 5)]);
+        assert_eq!(t.n_edges(), 2);
+    }
+
+    #[test]
+    fn pair_dims_match_input() {
+        let t = PairEnergyTable::new(&[(3, 2), (4, 5)]);
+        assert_eq!(t.dims(0), (3, 2));
+        assert_eq!(t.dims(1), (4, 5));
+    }
+
+    #[test]
+    fn pair_all_entries_zero_after_new() {
+        let t = PairEnergyTable::new(&[(2, 3)]);
+        for ri in 0..2 {
+            for rj in 0..3 {
+                assert_eq!(t.get(0, ri, rj), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn pair_set_then_get_round_trips() {
+        let mut t = PairEnergyTable::new(&[(3, 4)]);
+        t.set(0, 2, 3, -1.5);
+        assert_eq!(t.get(0, 2, 3), -1.5);
+    }
+
+    #[test]
+    fn pair_edges_are_independent() {
+        let mut t = PairEnergyTable::new(&[(2, 2), (2, 2)]);
+        t.set(0, 1, 0, 7.0);
+        assert_eq!(t.get(1, 1, 0), 0.0);
+    }
+
+    #[test]
+    fn pair_matrix_length_matches_product() {
+        let t = PairEnergyTable::new(&[(3, 4), (2, 5)]);
+        assert_eq!(t.matrix(0).len(), 12);
+        assert_eq!(t.matrix(1).len(), 10);
+    }
+
+    #[test]
+    fn pair_matrix_reflects_set_calls() {
+        let mut t = PairEnergyTable::new(&[(2, 3)]);
+        t.set(0, 0, 0, 1.0);
+        t.set(0, 0, 2, 3.0);
+        t.set(0, 1, 1, 5.0);
+        assert_eq!(t.matrix(0), &[1.0, 0.0, 3.0, 0.0, 5.0, 0.0]);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn pair_get_panics_edge_out_of_bounds() {
+        let t = PairEnergyTable::new(&[(2, 3)]);
+        let _ = t.get(1, 0, 0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn pair_get_panics_ri_out_of_bounds() {
+        let t = PairEnergyTable::new(&[(2, 3)]);
+        let _ = t.get(0, 2, 0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn pair_get_panics_rj_out_of_bounds() {
+        let t = PairEnergyTable::new(&[(2, 3)]);
+        let _ = t.get(0, 0, 3);
+    }
+}
