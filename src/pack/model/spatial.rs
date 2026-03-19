@@ -21,7 +21,8 @@ impl<T: Copy> SpatialGrid<T> {
     ///
     /// # Panics
     ///
-    /// Panics if `cell_size ≤ 0`, or if item count exceeds `u32::MAX`.
+    /// Panics if `cell_size ≤ 0`, if item count exceeds `u32::MAX`, or if the
+    /// resulting grid dimensions overflow `usize` (box too large for `cell_size`).
     pub fn build(items: impl IntoIterator<Item = (Vec3, T)>, cell_size: f32) -> Self {
         assert!(cell_size > 0.0, "cell_size must be positive");
 
@@ -73,7 +74,14 @@ impl<T: Copy> SpatialGrid<T> {
             (((max.y + eps - min.y) / cell_size).ceil() as usize).max(1),
             (((max.z + eps - min.z) / cell_size).ceil() as usize).max(1),
         ];
-        let num_cells = dims[0] * dims[1] * dims[2];
+        let num_cells = dims[0]
+            .checked_mul(dims[1])
+            .and_then(|v| v.checked_mul(dims[2]))
+            .unwrap_or_else(|| {
+                panic!(
+                    "spatial grid too large: dims={dims:?} (box extent too large or cell_size={cell_size} too small)"
+                )
+            });
 
         let mut counts = vec![0u32; num_cells];
         for &(pos, _) in &items {
@@ -428,5 +436,17 @@ mod tests {
     #[should_panic]
     fn build_panics_on_negative_cell_size() {
         SpatialGrid::<u32>::build(std::iter::empty(), -1.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn build_panics_on_grid_dim_overflow() {
+        SpatialGrid::<u32>::build(
+            [
+                (v(-f32::MAX, -f32::MAX, -f32::MAX), 0u32),
+                (v(f32::MAX, f32::MAX, f32::MAX), 1u32),
+            ],
+            1.0,
+        );
     }
 }
