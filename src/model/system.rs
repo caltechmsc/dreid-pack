@@ -175,9 +175,13 @@ pub struct VdwMatrix {
 }
 
 impl VdwMatrix {
-    /// Creates a new `VdwMatrix` with the given dimension and data.
+    /// Creates a VdW parameter matrix of dimension `n × n`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len() ≠ n * n`.
     pub fn new(n: usize, data: Vec<(f32, f32)>) -> Self {
-        debug_assert_eq!(data.len(), n * n);
+        assert_eq!(data.len(), n * n, "data.len() must equal n*n");
         Self { n, data }
     }
 
@@ -200,7 +204,7 @@ pub struct HBondParams {
 }
 
 impl HBondParams {
-    /// Creates a new `HBondParams` with the given types and parameters.
+    /// Creates a H-bond parameter set from types and parameters.
     pub fn new(
         h_types: HashSet<TypeIdx>,
         acc_types: HashSet<TypeIdx>,
@@ -515,14 +519,12 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn vdw_matrix_new_panics_on_wrong_data_length() {
         VdwMatrix::new(3, vec![(1.0f32, 1.0f32); 8]);
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic]
     fn set_sidechain_panics_on_overflow() {
         let mut r = ser_residue();
