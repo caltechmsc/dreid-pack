@@ -70,7 +70,7 @@ impl SelfEnergyTable {
 
     /// Returns `true` if candidate `r` in slot `s` has been pruned.
     pub fn is_pruned(&self, s: usize, r: usize) -> bool {
-        self.get(s, r).is_infinite()
+        self.get(s, r) == f32::INFINITY
     }
 
     /// Physically removes pruned candidates and rebuilds offsets.
@@ -87,7 +87,7 @@ impl SelfEnergyTable {
             let base = self.offsets[s];
             let count = self.offsets[s + 1] - base;
             let alive: Vec<u16> = (0..count)
-                .filter(|&r| !self.data[base + r].is_infinite())
+                .filter(|&r| self.data[base + r] != f32::INFINITY)
                 .map(|r| r as u16)
                 .collect();
             for &orig in &alive {
