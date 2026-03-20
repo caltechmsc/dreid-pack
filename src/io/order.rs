@@ -35,3 +35,68 @@ pub fn sidechain(rt: ResidueType) -> &'static [&'static str] {
         ResidueType::Lys => &["CB", "CG", "CD", "CE", "NZ", "HB2", "HB3", "HG2", "HG3", "HD2", "HD3", "HE2", "HE3", "HZ1", "HZ2", "HZ3"],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::sidechain;
+    use crate::model::residue::ResidueType;
+
+    const ALL: &[ResidueType] = &[
+        ResidueType::Gly,
+        ResidueType::Ala,
+        ResidueType::Val,
+        ResidueType::Cym,
+        ResidueType::Cyx,
+        ResidueType::Cys,
+        ResidueType::Ser,
+        ResidueType::Thr,
+        ResidueType::Pro,
+        ResidueType::Asp,
+        ResidueType::Asn,
+        ResidueType::Ile,
+        ResidueType::Leu,
+        ResidueType::Phe,
+        ResidueType::Tym,
+        ResidueType::Hid,
+        ResidueType::Hie,
+        ResidueType::Hip,
+        ResidueType::Trp,
+        ResidueType::Ash,
+        ResidueType::Tyr,
+        ResidueType::Met,
+        ResidueType::Glu,
+        ResidueType::Gln,
+        ResidueType::Glh,
+        ResidueType::Arg,
+        ResidueType::Arn,
+        ResidueType::Lyn,
+        ResidueType::Lys,
+    ];
+
+    #[test]
+    fn count_matches_n_atoms() {
+        for &rt in ALL {
+            assert_eq!(sidechain(rt).len(), rt.n_atoms() as usize, "{rt:?}");
+        }
+    }
+
+    #[test]
+    fn no_duplicate_atoms() {
+        for &rt in ALL {
+            let mut seen = std::collections::HashSet::new();
+            for &name in sidechain(rt) {
+                assert!(seen.insert(name), "{rt:?}: duplicate {name:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn packable_nonempty_gly_empty() {
+        for &rt in ALL {
+            if rt.is_packable() {
+                assert!(!sidechain(rt).is_empty(), "{rt:?}");
+            }
+        }
+        assert!(sidechain(ResidueType::Gly).is_empty());
+    }
+}
