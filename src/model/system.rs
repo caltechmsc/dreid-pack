@@ -165,29 +165,95 @@ pub struct ForceFieldParams {
     pub hbond: HBondParams,
 }
 
-/// Flat symmetric VdW matrix.
+/// VdW parameter matrix (LJ 12-6 or Buckingham (EXP-6)).
 #[derive(Debug, Clone)]
-pub struct VdwMatrix {
-    /// Number of atom types (matrix dimension).
-    n: usize,
-    /// Flat symmetric matrix of (D0, R0^2) parameters.
-    data: Vec<(f32, f32)>,
+pub enum VdwMatrix {
+    /// Lennard-Jones 12-6 variant.
+    LennardJones(LjMatrix),
+    /// Buckingham (EXP-6) variant.
+    Buckingham(BuckMatrix),
 }
 
-impl VdwMatrix {
-    /// Creates a VdW parameter matrix of dimension `n × n`.
+/// Pre-computed pair parameters for the LJ 12-6 potential.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LjPair {
+    /// Well depth.
+    pub d0: f32,
+    /// Squared equilibrium distance.
+    pub r0_sq: f32,
+}
+
+/// Pre-computed pair parameters for the Buckingham (EXP-6) potential.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuckPair {
+    /// Repulsion prefactor A.
+    pub a: f32,
+    /// Repulsion decay B.
+    pub b: f32,
+    /// Attraction coefficient C.
+    pub c: f32,
+    /// Squared distance of the energy maximum.
+    pub r_max_sq: f32,
+    /// Twice the energy value at the maximum.
+    pub two_e_max: f32,
+}
+
+/// Flat symmetric n×n matrix of pre-computed [`LjPair`] parameters.
+#[derive(Debug, Clone)]
+pub struct LjMatrix {
+    /// Number of atom types (matrix dimension).
+    n: usize,
+    /// Flat array of length n*n.
+    data: Box<[LjPair]>,
+}
+
+impl LjMatrix {
+    /// Creates an LJ parameter matrix of dimension `n × n`.
     ///
     /// # Panics
     ///
     /// Panics if `data.len() ≠ n * n`.
-    pub fn new(n: usize, data: Vec<(f32, f32)>) -> Self {
+    pub fn new(n: usize, data: Vec<LjPair>) -> Self {
         assert_eq!(data.len(), n * n, "data.len() must equal n*n");
-        Self { n, data }
+        Self {
+            n,
+            data: data.into_boxed_slice(),
+        }
     }
 
-    /// Returns the (D0, R0^2) parameters for the given pair of atom types.
+    /// Returns the [`LjPair`] parameters for the given atom types.
     #[inline(always)]
-    pub fn get(&self, i: TypeIdx, j: TypeIdx) -> (f32, f32) {
+    pub fn get(&self, i: TypeIdx, j: TypeIdx) -> LjPair {
+        self.data[usize::from(i) * self.n + usize::from(j)]
+    }
+}
+
+/// Flat symmetric n×n matrix of pre-computed [`BuckPair`] parameters.
+#[derive(Debug, Clone)]
+pub struct BuckMatrix {
+    /// Number of atom types (matrix dimension).
+    n: usize,
+    /// Flat array of length n*n.
+    data: Box<[BuckPair]>,
+}
+
+impl BuckMatrix {
+    /// Creates a Buckingham parameter matrix of dimension `n × n`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len() ≠ n * n`.
+    pub fn new(n: usize, data: Vec<BuckPair>) -> Self {
+        assert_eq!(data.len(), n * n, "data.len() must equal n*n");
+        Self {
+            n,
+            data: data.into_boxed_slice(),
+        }
+    }
+
+    /// Returns the [`BuckPair`] parameters for the given atom types.
+    #[inline(always)]
+    pub fn get(&self, i: TypeIdx, j: TypeIdx) -> BuckPair {
         self.data[usize::from(i) * self.n + usize::from(j)]
     }
 }
@@ -271,12 +337,43 @@ mod tests {
         .unwrap()
     }
 
-    fn identity_vdw(n: usize) -> VdwMatrix {
-        let mut data = vec![(0.0f32, 0.0f32); n * n];
+    fn lj_identity(n: usize) -> LjMatrix {
+        let mut data = vec![
+            LjPair {
+                d0: 0.0,
+                r0_sq: 0.0
+            };
+            n * n
+        ];
         for i in 0..n {
-            data[i * n + i] = (1.0, 4.0);
+            data[i * n + i] = LjPair {
+                d0: 1.0,
+                r0_sq: 4.0,
+            };
         }
-        VdwMatrix::new(n, data)
+        LjMatrix::new(n, data)
+    }
+
+    fn buck_identity(n: usize) -> BuckMatrix {
+        let zero = BuckPair {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            r_max_sq: 0.0,
+            two_e_max: 0.0,
+        };
+        let diag = BuckPair {
+            a: 1.0,
+            b: 0.5,
+            c: 2.0,
+            r_max_sq: 4.0,
+            two_e_max: 0.1,
+        };
+        let mut data = vec![zero; n * n];
+        for i in 0..n {
+            data[i * n + i] = diag;
+        }
+        BuckMatrix::new(n, data)
     }
 
     fn empty_hbond() -> HBondParams {
@@ -340,27 +437,91 @@ mod tests {
     }
 
     #[test]
-    fn vdw_matrix_diagonal_lookup() {
-        let m = identity_vdw(4);
-        assert_eq!(m.get(t(0), t(0)), (1.0, 4.0));
-        assert_eq!(m.get(t(1), t(1)), (1.0, 4.0));
+    fn lj_matrix_diagonal_lookup() {
+        let m = lj_identity(4);
+        assert_eq!(
+            m.get(t(0), t(0)),
+            LjPair {
+                d0: 1.0,
+                r0_sq: 4.0
+            }
+        );
+        assert_eq!(
+            m.get(t(3), t(3)),
+            LjPair {
+                d0: 1.0,
+                r0_sq: 4.0
+            }
+        );
     }
 
     #[test]
-    fn vdw_matrix_off_diagonal_zero() {
-        let m = identity_vdw(4);
-        assert_eq!(m.get(t(0), t(1)), (0.0, 0.0));
-        assert_eq!(m.get(t(2), t(3)), (0.0, 0.0));
+    fn lj_matrix_off_diagonal_zero() {
+        let m = lj_identity(4);
+        assert_eq!(
+            m.get(t(0), t(1)),
+            LjPair {
+                d0: 0.0,
+                r0_sq: 0.0
+            }
+        );
+        assert_eq!(
+            m.get(t(2), t(3)),
+            LjPair {
+                d0: 0.0,
+                r0_sq: 0.0
+            }
+        );
     }
 
     #[test]
-    fn vdw_matrix_symmetric_fill() {
+    fn lj_matrix_symmetric_fill() {
         let n = 3usize;
-        let mut data = vec![(0.0f32, 0.0f32); n * n];
-        data[0 * n + 1] = (2.0, 8.0);
-        data[1 * n + 0] = (2.0, 8.0);
-        let m = VdwMatrix::new(n, data);
+        let mut data = vec![
+            LjPair {
+                d0: 0.0,
+                r0_sq: 0.0
+            };
+            n * n
+        ];
+        data[0 * n + 1] = LjPair {
+            d0: 2.0,
+            r0_sq: 8.0,
+        };
+        data[1 * n + 0] = LjPair {
+            d0: 2.0,
+            r0_sq: 8.0,
+        };
+        let m = LjMatrix::new(n, data);
         assert_eq!(m.get(t(0), t(1)), m.get(t(1), t(0)));
+    }
+
+    #[test]
+    fn buck_matrix_diagonal_lookup() {
+        let m = buck_identity(4);
+        let diag = BuckPair {
+            a: 1.0,
+            b: 0.5,
+            c: 2.0,
+            r_max_sq: 4.0,
+            two_e_max: 0.1,
+        };
+        assert_eq!(m.get(t(0), t(0)), diag);
+        assert_eq!(m.get(t(3), t(3)), diag);
+    }
+
+    #[test]
+    fn buck_matrix_off_diagonal_zero() {
+        let m = buck_identity(4);
+        let zero = BuckPair {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            r_max_sq: 0.0,
+            two_e_max: 0.0,
+        };
+        assert_eq!(m.get(t(0), t(1)), zero);
+        assert_eq!(m.get(t(2), t(3)), zero);
     }
 
     #[test]
@@ -407,7 +568,7 @@ mod tests {
                 donor_for_h: vec![],
             },
             ff: ForceFieldParams {
-                vdw: identity_vdw(4),
+                vdw: VdwMatrix::LennardJones(lj_identity(4)),
                 hbond: empty_hbond(),
             },
         };
@@ -520,8 +681,30 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn vdw_matrix_new_panics_on_wrong_data_length() {
-        VdwMatrix::new(3, vec![(1.0f32, 1.0f32); 8]);
+    fn lj_matrix_new_panics_on_wrong_data_length() {
+        LjMatrix::new(
+            3,
+            vec![
+                LjPair {
+                    d0: 1.0,
+                    r0_sq: 1.0
+                };
+                8
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn buck_matrix_new_panics_on_wrong_data_length() {
+        let p = BuckPair {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            r_max_sq: 0.0,
+            two_e_max: 0.0,
+        };
+        BuckMatrix::new(3, vec![p; 8]);
     }
 
     #[test]
