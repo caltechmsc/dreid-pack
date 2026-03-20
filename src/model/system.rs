@@ -212,9 +212,13 @@ impl LjMatrix {
     ///
     /// # Panics
     ///
-    /// Panics if `data.len() ≠ n * n`.
+    /// Panics if `data.len() ≠ n * n`, or if the matrix is not symmetric.
     pub fn new(n: usize, data: Vec<LjPair>) -> Self {
         assert_eq!(data.len(), n * n, "data.len() must equal n*n");
+        assert!(
+            (0..n).all(|i| (0..i).all(|j| data[i * n + j] == data[j * n + i])),
+            "matrix must be symmetric"
+        );
         Self {
             n,
             data: data.into_boxed_slice(),
@@ -242,9 +246,13 @@ impl BuckMatrix {
     ///
     /// # Panics
     ///
-    /// Panics if `data.len() ≠ n * n`.
+    /// Panics if `data.len() ≠ n * n`, or if the matrix is not symmetric.
     pub fn new(n: usize, data: Vec<BuckPair>) -> Self {
         assert_eq!(data.len(), n * n, "data.len() must equal n*n");
+        assert!(
+            (0..n).all(|i| (0..i).all(|j| data[i * n + j] == data[j * n + i])),
+            "matrix must be symmetric"
+        );
         Self {
             n,
             data: data.into_boxed_slice(),
@@ -525,6 +533,30 @@ mod tests {
     }
 
     #[test]
+    fn buck_matrix_symmetric_fill() {
+        let n = 3usize;
+        let pair = BuckPair {
+            a: 1.0,
+            b: 0.5,
+            c: 2.0,
+            r_max_sq: 4.0,
+            two_e_max: 0.1,
+        };
+        let zero = BuckPair {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            r_max_sq: 0.0,
+            two_e_max: 0.0,
+        };
+        let mut data = vec![zero; n * n];
+        data[0 * n + 1] = pair;
+        data[1 * n + 0] = pair;
+        let m = BuckMatrix::new(n, data);
+        assert_eq!(m.get(t(0), t(1)), m.get(t(1), t(0)));
+    }
+
+    #[test]
     fn hbond_candidate_both_directions() {
         let mut h_types = HashSet::new();
         let mut acc_types = HashSet::new();
@@ -696,6 +728,21 @@ mod tests {
 
     #[test]
     #[should_panic]
+    fn lj_matrix_new_panics_on_asymmetric() {
+        let zero = LjPair {
+            d0: 0.0,
+            r0_sq: 0.0,
+        };
+        let mut data = vec![zero; 4];
+        data[0 * 2 + 1] = LjPair {
+            d0: 1.0,
+            r0_sq: 1.0,
+        };
+        LjMatrix::new(2, data);
+    }
+
+    #[test]
+    #[should_panic]
     fn buck_matrix_new_panics_on_wrong_data_length() {
         let p = BuckPair {
             a: 0.0,
@@ -705,6 +752,27 @@ mod tests {
             two_e_max: 0.0,
         };
         BuckMatrix::new(3, vec![p; 8]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn buck_matrix_new_panics_on_asymmetric() {
+        let zero = BuckPair {
+            a: 0.0,
+            b: 0.0,
+            c: 0.0,
+            r_max_sq: 0.0,
+            two_e_max: 0.0,
+        };
+        let mut data = vec![zero; 4];
+        data[0 * 2 + 1] = BuckPair {
+            a: 1.0,
+            b: 0.5,
+            c: 2.0,
+            r_max_sq: 4.0,
+            two_e_max: 0.1,
+        };
+        BuckMatrix::new(2, data);
     }
 
     #[test]
