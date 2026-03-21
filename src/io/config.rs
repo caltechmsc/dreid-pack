@@ -1,3 +1,4 @@
+use super::error::Error;
 use std::collections::HashSet;
 
 /// Structure file format for biomolecular systems.
@@ -110,11 +111,12 @@ impl HeteroTemplate {
     ///
     /// # Errors
     ///
-    /// Returns [`dreid_forge::io::Error`] if the MOL2 data is malformed or
+    /// Returns [`Error::Template`] if the MOL2 data is malformed or
     /// contains an invalid structure definition.
-    pub fn read_mol2<R: std::io::BufRead>(reader: R) -> Result<Self, dreid_forge::io::Error> {
-        // FIXME: Use Error type from this crate instead of re-exporting from dreid-forge.
-        dreid_forge::io::read_mol2_template(reader).map(Self)
+    pub fn read_mol2<R: std::io::BufRead>(reader: R) -> Result<Self, Error> {
+        dreid_forge::io::read_mol2_template(reader)
+            .map(Self)
+            .map_err(|e| Error::Template(e.to_string()))
     }
 }
 
