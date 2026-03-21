@@ -144,7 +144,7 @@ pub enum VdwPotential {
 }
 
 /// Partial charge assignment settings for the hybrid biomolecule/QEq scheme.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ChargeConfig {
     /// Charge scheme for standard amino acid residues.
     ///
@@ -164,18 +164,6 @@ pub struct ChargeConfig {
     ///
     /// Default [`HeteroQeqMethod::Embedded`] (embedded QEq, polarised).
     pub default_hetero_method: HeteroQeqMethod,
-}
-
-impl Default for ChargeConfig {
-    fn default() -> Self {
-        Self {
-            protein_scheme: ProteinScheme::default(),
-            nucleic_scheme: NucleicScheme::default(),
-            water_scheme: WaterScheme::default(),
-            hetero_configs: Vec::new(),
-            default_hetero_method: HeteroQeqMethod::default(),
-        }
-    }
 }
 
 /// Classical partial charge scheme for protein residues.
