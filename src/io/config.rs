@@ -164,7 +164,7 @@ pub struct ChargeConfig {
     pub hetero_configs: Vec<HeteroChargeConfig>,
     /// QEq method for hetero residues not listed in [`hetero_configs`](Self::hetero_configs).
     ///
-    /// Default [`HeteroQeqMethod::Embedded`] (embedded QEq, polarised).
+    /// Default [`HeteroQeqMethod::Embedded`] (embedded QEq, polarized).
     pub default_hetero_method: HeteroQeqMethod,
 }
 
@@ -224,7 +224,7 @@ pub struct HeteroChargeConfig {
     pub selector: ResidueSelector,
     /// QEq method to use for this residue.
     ///
-    /// Default [`HeteroQeqMethod::Embedded`] (embedded QEq, polarised).
+    /// Default [`HeteroQeqMethod::Embedded`] (embedded QEq, polarized).
     pub method: HeteroQeqMethod,
 }
 
@@ -233,7 +233,7 @@ pub struct HeteroChargeConfig {
 pub enum HeteroQeqMethod {
     /// Vacuum QEq — residue treated as an isolated molecule.
     Vacuum(QeqConfig),
-    /// Embedded QEq — residue polarised by surrounding fixed charges.
+    /// Embedded QEq — residue polarized by surrounding fixed charges.
     Embedded(EmbeddedQeqConfig),
 }
 
