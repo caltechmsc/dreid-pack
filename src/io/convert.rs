@@ -271,7 +271,7 @@ fn group_residues(bio: &BioMetadata) -> Vec<ResidueGroup> {
     let mut groups: Vec<ResidueGroup> = Vec::new();
 
     for (i, info) in bio.atom_info.iter().enumerate() {
-        let same = groups.last().map_or(false, |g| {
+        let same = groups.last().is_some_and(|g| {
             g.chain_id == info.chain_id
                 && g.residue_id == info.residue_id
                 && g.insertion_code == info.insertion_code
