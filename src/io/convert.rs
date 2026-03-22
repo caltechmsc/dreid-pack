@@ -874,3 +874,613 @@ fn dihedral(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> f32 {
 fn to_vec3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+    use dreid_forge::BondOrder;
+
+    fn ai(name: &str, res: &str, resid: i32, chain: &str) -> AtomResidueInfo {
+        AtomResidueInfo::builder(name, res, resid, chain).build()
+    }
+
+    fn ai_icode(
+        name: &str,
+        res: &str,
+        resid: i32,
+        chain: &str,
+        icode: Option<char>,
+    ) -> AtomResidueInfo {
+        AtomResidueInfo::builder(name, res, resid, chain)
+            .insertion_code_opt(icode)
+            .build()
+    }
+
+    fn ai_full(
+        name: &str,
+        res: &str,
+        resid: i32,
+        chain: &str,
+        icode: Option<char>,
+        std_name: Option<StandardResidue>,
+        cat: ResidueCategory,
+        pos: ResiduePosition,
+    ) -> AtomResidueInfo {
+        AtomResidueInfo::builder(name, res, resid, chain)
+            .insertion_code_opt(icode)
+            .standard_name(std_name)
+            .category(cat)
+            .position(pos)
+            .build()
+    }
+
+    fn bio_with(infos: Vec<AtomResidueInfo>) -> BioMetadata {
+        let mut bio = BioMetadata::new();
+        bio.atom_info = infos;
+        bio
+    }
+
+    fn group_with(indices: Vec<usize>) -> ResidueGroup {
+        ResidueGroup {
+            chain_id: "A".into(),
+            residue_id: 1,
+            insertion_code: None,
+            residue_name: "SER".into(),
+            standard_name: None,
+            category: ResidueCategory::Standard,
+            position: ResiduePosition::None,
+            atom_indices: indices,
+        }
+    }
+
+    fn mobile_meta(sc: Vec<usize>) -> MobileMetadata {
+        MobileMetadata {
+            group_idx: 0,
+            res_type: ResidueType::Ser,
+            n_idx: 0,
+            ca_idx: 0,
+            c_idx: 0,
+            sc_df_indices: sc,
+        }
+    }
+
+    #[test]
+    fn bio_format_maps_pdb() {
+        assert_eq!(bio_format(Format::Pdb), dreid_forge::io::Format::Pdb);
+    }
+
+    #[test]
+    fn bio_format_maps_mmcif() {
+        assert_eq!(bio_format(Format::Mmcif), dreid_forge::io::Format::Mmcif);
+    }
+
+    #[test]
+    fn residue_name_all_mappings_correct() {
+        let cases = [
+            ("GLY", ResidueType::Gly),
+            ("ALA", ResidueType::Ala),
+            ("VAL", ResidueType::Val),
+            ("CYM", ResidueType::Cym),
+            ("CYX", ResidueType::Cyx),
+            ("CYS", ResidueType::Cys),
+            ("SER", ResidueType::Ser),
+            ("THR", ResidueType::Thr),
+            ("PRO", ResidueType::Pro),
+            ("ASP", ResidueType::Asp),
+            ("ASN", ResidueType::Asn),
+            ("ILE", ResidueType::Ile),
+            ("LEU", ResidueType::Leu),
+            ("PHE", ResidueType::Phe),
+            ("TYM", ResidueType::Tym),
+            ("HID", ResidueType::Hid),
+            ("HIE", ResidueType::Hie),
+            ("HIP", ResidueType::Hip),
+            ("TRP", ResidueType::Trp),
+            ("ASH", ResidueType::Ash),
+            ("TYR", ResidueType::Tyr),
+            ("MET", ResidueType::Met),
+            ("GLU", ResidueType::Glu),
+            ("GLN", ResidueType::Gln),
+            ("GLH", ResidueType::Glh),
+            ("ARG", ResidueType::Arg),
+            ("ARN", ResidueType::Arn),
+            ("LYN", ResidueType::Lyn),
+            ("LYS", ResidueType::Lys),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(residue_name_to_type(name), Some(expected), "{name}");
+        }
+    }
+
+    #[test]
+    fn residue_name_unknown_returns_none() {
+        assert!(residue_name_to_type("XYZ").is_none());
+        assert!(residue_name_to_type("").is_none());
+        assert!(residue_name_to_type("HOH").is_none());
+        assert!(residue_name_to_type("ACE").is_none());
+    }
+
+    #[test]
+    fn residue_name_case_sensitive() {
+        assert!(residue_name_to_type("gly").is_none());
+        assert!(residue_name_to_type("Gly").is_none());
+        assert!(residue_name_to_type("GLy").is_none());
+    }
+
+    #[test]
+    fn group_residues_empty() {
+        assert!(group_residues(&bio_with(vec![])).is_empty());
+    }
+
+    #[test]
+    fn group_residues_single_all_fields() {
+        let bio = bio_with(vec![
+            ai_full(
+                "N",
+                "SER",
+                5,
+                "B",
+                Some('X'),
+                Some(StandardResidue::SER),
+                ResidueCategory::Standard,
+                ResiduePosition::NTerminal,
+            ),
+            ai_icode("CA", "SER", 5, "B", Some('X')),
+            ai_icode("C", "SER", 5, "B", Some('X')),
+        ]);
+        let groups = group_residues(&bio);
+        assert_eq!(groups.len(), 1);
+        let g = &groups[0];
+        assert_eq!(g.chain_id, "B");
+        assert_eq!(g.residue_id, 5);
+        assert_eq!(g.insertion_code, Some('X'));
+        assert_eq!(g.residue_name, "SER");
+        assert_eq!(g.standard_name, Some(StandardResidue::SER));
+        assert_eq!(g.category, ResidueCategory::Standard);
+        assert_eq!(g.position, ResiduePosition::NTerminal);
+        assert_eq!(g.atom_indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn group_residues_merge() {
+        let bio = bio_with(vec![
+            ai("N", "ALA", 1, "A"),
+            ai("CA", "ALA", 1, "A"),
+            ai("C", "ALA", 1, "A"),
+            ai("O", "ALA", 1, "A"),
+            ai("CB", "ALA", 1, "A"),
+        ]);
+        let groups = group_residues(&bio);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].atom_indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn group_residues_split_by_chain() {
+        let bio = bio_with(vec![ai("N", "ALA", 1, "A"), ai("CA", "ALA", 1, "B")]);
+        let groups = group_residues(&bio);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].chain_id, "A");
+        assert_eq!(groups[0].atom_indices, vec![0]);
+        assert_eq!(groups[1].chain_id, "B");
+        assert_eq!(groups[1].atom_indices, vec![1]);
+    }
+
+    #[test]
+    fn group_residues_split_by_resid() {
+        let bio = bio_with(vec![ai("N", "SER", 1, "A"), ai("N", "SER", 2, "A")]);
+        let groups = group_residues(&bio);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].residue_id, 1);
+        assert_eq!(groups[0].atom_indices, vec![0]);
+        assert_eq!(groups[1].residue_id, 2);
+        assert_eq!(groups[1].atom_indices, vec![1]);
+    }
+
+    #[test]
+    fn group_residues_split_by_icode() {
+        let bio = bio_with(vec![
+            ai_icode("N", "SER", 1, "A", None),
+            ai_icode("N", "SER", 1, "A", Some('A')),
+        ]);
+        let groups = group_residues(&bio);
+        assert_eq!(groups.len(), 2);
+        assert!(groups[0].insertion_code.is_none());
+        assert_eq!(groups[0].atom_indices, vec![0]);
+        assert_eq!(groups[1].insertion_code, Some('A'));
+        assert_eq!(groups[1].atom_indices, vec![1]);
+    }
+
+    #[test]
+    fn find_backbone_present() {
+        let bio = bio_with(vec![
+            ai("N", "SER", 1, "A"),
+            ai("CA", "SER", 1, "A"),
+            ai("C", "SER", 1, "A"),
+        ]);
+        let g = group_with(vec![0, 1, 2]);
+        assert_eq!(find_backbone_atom(&g, &bio, "CA"), Some(1));
+    }
+
+    #[test]
+    fn find_backbone_absent() {
+        let bio = bio_with(vec![ai("N", "SER", 1, "A"), ai("CA", "SER", 1, "A")]);
+        let g = group_with(vec![0, 1]);
+        assert_eq!(find_backbone_atom(&g, &bio, "CB"), None);
+    }
+
+    #[test]
+    fn find_backbone_first_occurrence() {
+        let bio = bio_with(vec![
+            ai("CA", "SER", 1, "A"),
+            ai("N", "SER", 1, "A"),
+            ai("CA", "SER", 1, "A"),
+        ]);
+        let g = group_with(vec![0, 1, 2]);
+        assert_eq!(find_backbone_atom(&g, &bio, "CA"), Some(0));
+    }
+
+    #[test]
+    fn atom_to_ref_no_mobile() {
+        let refs = build_atom_to_ref(3, &[]);
+        assert_eq!(
+            refs,
+            vec![AtomRef::Fixed(0), AtomRef::Fixed(1), AtomRef::Fixed(2)]
+        );
+    }
+
+    #[test]
+    fn atom_to_ref_mobile_refs() {
+        let metas = [mobile_meta(vec![1, 3])];
+        let refs = build_atom_to_ref(5, &metas);
+        assert_eq!(
+            refs[1],
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0
+            }
+        );
+        assert_eq!(
+            refs[3],
+            AtomRef::Mobile {
+                residue: 0,
+                local: 1
+            }
+        );
+    }
+
+    #[test]
+    fn atom_to_ref_contiguous_fixed() {
+        let metas = [mobile_meta(vec![1, 3])];
+        let refs = build_atom_to_ref(5, &metas);
+        assert_eq!(refs[0], AtomRef::Fixed(0));
+        assert_eq!(refs[2], AtomRef::Fixed(1));
+        assert_eq!(refs[4], AtomRef::Fixed(2));
+    }
+
+    #[test]
+    fn atom_to_ref_local_order() {
+        let metas = [mobile_meta(vec![3, 1])];
+        let refs = build_atom_to_ref(5, &metas);
+        assert_eq!(
+            refs[3],
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0
+            }
+        );
+        assert_eq!(
+            refs[1],
+            AtomRef::Mobile {
+                residue: 0,
+                local: 1
+            }
+        );
+    }
+
+    #[test]
+    fn atom_to_ref_two_residues() {
+        let metas = [mobile_meta(vec![1, 2]), mobile_meta(vec![4, 5])];
+        let refs = build_atom_to_ref(6, &metas);
+        assert_eq!(refs[0], AtomRef::Fixed(0));
+        assert_eq!(
+            refs[1],
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0
+            }
+        );
+        assert_eq!(
+            refs[2],
+            AtomRef::Mobile {
+                residue: 0,
+                local: 1
+            }
+        );
+        assert_eq!(refs[3], AtomRef::Fixed(1));
+        assert_eq!(
+            refs[4],
+            AtomRef::Mobile {
+                residue: 1,
+                local: 0
+            }
+        );
+        assert_eq!(
+            refs[5],
+            AtomRef::Mobile {
+                residue: 1,
+                local: 1
+            }
+        );
+    }
+
+    #[test]
+    fn vdw_empty_yields_zero_lj() {
+        let m = build_vdw_matrix(2, &[]).unwrap();
+        let VdwMatrix::LennardJones(lj) = m else {
+            panic!("expected LJ");
+        };
+        let zero = LjPair {
+            d0: 0.0,
+            r0_sq: 0.0,
+        };
+        assert_eq!(lj.get(TypeIdx(0), TypeIdx(0)), zero);
+        assert_eq!(lj.get(TypeIdx(0), TypeIdx(1)), zero);
+        assert_eq!(lj.get(TypeIdx(1), TypeIdx(0)), zero);
+        assert_eq!(lj.get(TypeIdx(1), TypeIdx(1)), zero);
+    }
+
+    #[test]
+    fn vdw_lj_symmetric() {
+        let pairs = vec![VdwPairPotential::LennardJones {
+            type1_idx: 0,
+            type2_idx: 1,
+            d0: 3.0,
+            r0_sq: 9.0,
+        }];
+        let m = build_vdw_matrix(2, &pairs).unwrap();
+        let VdwMatrix::LennardJones(lj) = m else {
+            panic!("expected LJ");
+        };
+        let p01 = lj.get(TypeIdx(0), TypeIdx(1));
+        let p10 = lj.get(TypeIdx(1), TypeIdx(0));
+        assert_eq!(p01, p10);
+        assert_ne!(p01.d0, 0.0);
+    }
+
+    #[test]
+    fn vdw_lj_values() {
+        let pairs = vec![VdwPairPotential::LennardJones {
+            type1_idx: 0,
+            type2_idx: 1,
+            d0: 2.5,
+            r0_sq: 6.25,
+        }];
+        let m = build_vdw_matrix(2, &pairs).unwrap();
+        let VdwMatrix::LennardJones(lj) = m else {
+            panic!("expected LJ");
+        };
+        let p = lj.get(TypeIdx(0), TypeIdx(1));
+        assert_eq!(p.d0, 2.5f32);
+        assert_eq!(p.r0_sq, 6.25f32);
+    }
+
+    #[test]
+    fn vdw_buck_symmetric() {
+        let pairs = vec![VdwPairPotential::Buckingham {
+            type1_idx: 0,
+            type2_idx: 1,
+            a: 1.0,
+            b: 2.0,
+            c: 3.0,
+            r_max_sq: 4.0,
+            two_e_max: 5.0,
+        }];
+        let m = build_vdw_matrix(2, &pairs).unwrap();
+        let VdwMatrix::Buckingham(buck) = m else {
+            panic!("expected Buck");
+        };
+        let p01 = buck.get(TypeIdx(0), TypeIdx(1));
+        let p10 = buck.get(TypeIdx(1), TypeIdx(0));
+        assert_eq!(p01, p10);
+        assert_ne!(p01.a, 0.0);
+    }
+
+    #[test]
+    fn vdw_buck_values() {
+        let pairs = vec![VdwPairPotential::Buckingham {
+            type1_idx: 0,
+            type2_idx: 0,
+            a: 10.0,
+            b: 20.0,
+            c: 30.0,
+            r_max_sq: 40.0,
+            two_e_max: 50.0,
+        }];
+        let m = build_vdw_matrix(1, &pairs).unwrap();
+        let VdwMatrix::Buckingham(buck) = m else {
+            panic!("expected Buck");
+        };
+        let p = buck.get(TypeIdx(0), TypeIdx(0));
+        assert_eq!(p.a, 10.0f32);
+        assert_eq!(p.b, 20.0f32);
+        assert_eq!(p.c, 30.0f32);
+        assert_eq!(p.r_max_sq, 40.0f32);
+        assert_eq!(p.two_e_max, 50.0f32);
+    }
+
+    #[test]
+    fn vdw_mixed_returns_error() {
+        let pairs = vec![
+            VdwPairPotential::LennardJones {
+                type1_idx: 0,
+                type2_idx: 0,
+                d0: 1.0,
+                r0_sq: 1.0,
+            },
+            VdwPairPotential::Buckingham {
+                type1_idx: 0,
+                type2_idx: 1,
+                a: 1.0,
+                b: 1.0,
+                c: 1.0,
+                r_max_sq: 1.0,
+                two_e_max: 1.0,
+            },
+        ];
+        assert!(build_vdw_matrix(2, &pairs).is_err());
+    }
+
+    #[test]
+    fn build_bonds_empty() {
+        assert!(build_bonds(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn build_bonds_fixed_fixed() {
+        let refs = vec![AtomRef::Fixed(0), AtomRef::Fixed(1)];
+        let df = vec![dreid_forge::Bond {
+            i: 0,
+            j: 1,
+            order: BondOrder::Single,
+        }];
+        let bonds = build_bonds(&df, &refs);
+        assert_eq!(bonds.len(), 1);
+        assert_eq!(bonds[0].a, AtomRef::Fixed(0));
+        assert_eq!(bonds[0].b, AtomRef::Fixed(1));
+        assert_eq!(bonds[0].order, BondOrder::Single);
+    }
+
+    #[test]
+    fn build_bonds_mobile_mobile() {
+        let refs = vec![
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0,
+            },
+            AtomRef::Mobile {
+                residue: 0,
+                local: 1,
+            },
+        ];
+        let df = vec![dreid_forge::Bond {
+            i: 0,
+            j: 1,
+            order: BondOrder::Double,
+        }];
+        let bonds = build_bonds(&df, &refs);
+        assert_eq!(bonds.len(), 1);
+        assert_eq!(
+            bonds[0].a,
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0,
+            }
+        );
+        assert_eq!(
+            bonds[0].b,
+            AtomRef::Mobile {
+                residue: 0,
+                local: 1,
+            }
+        );
+        assert_eq!(bonds[0].order, BondOrder::Double);
+    }
+
+    #[test]
+    fn build_bonds_fixed_mobile() {
+        let refs = vec![
+            AtomRef::Fixed(0),
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0,
+            },
+        ];
+        let df = vec![dreid_forge::Bond {
+            i: 0,
+            j: 1,
+            order: BondOrder::Single,
+        }];
+        let bonds = build_bonds(&df, &refs);
+        assert_eq!(bonds.len(), 1);
+        assert_eq!(bonds[0].a, AtomRef::Fixed(0));
+        assert_eq!(
+            bonds[0].b,
+            AtomRef::Mobile {
+                residue: 0,
+                local: 0,
+            }
+        );
+        assert_eq!(bonds[0].order, BondOrder::Single);
+    }
+
+    #[test]
+    fn build_bonds_order_preserved() {
+        let refs = vec![AtomRef::Fixed(0), AtomRef::Fixed(1)];
+        for order in [
+            BondOrder::Single,
+            BondOrder::Double,
+            BondOrder::Triple,
+            BondOrder::Aromatic,
+        ] {
+            let df = vec![dreid_forge::Bond { i: 0, j: 1, order }];
+            let bonds = build_bonds(&df, &refs);
+            assert_eq!(bonds.len(), 1);
+            assert_eq!(bonds[0].order, order);
+        }
+    }
+
+    #[test]
+    fn dihedral_trans() {
+        let angle = dihedral(
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 1.0, 0.0],
+        );
+        assert_abs_diff_eq!(angle, std::f32::consts::PI, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn dihedral_cis() {
+        let angle = dihedral(
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+        );
+        assert_abs_diff_eq!(angle, 0.0_f32, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn dihedral_right_angle() {
+        let angle = dihedral(
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+        );
+        assert_abs_diff_eq!(angle, std::f32::consts::FRAC_PI_2, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn dihedral_sign_flips_on_reflection() {
+        let a = [1.0, 0.0, 0.0];
+        let b = [0.0, 0.0, 0.0];
+        let c = [0.0, 1.0, 0.0];
+        let above = dihedral(a, b, c, [0.0, 1.0, 1.0]);
+        let below = dihedral(a, b, c, [0.0, 1.0, -1.0]);
+        assert_abs_diff_eq!(above, -below, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn to_vec3_zeros() {
+        assert_eq!(to_vec3([0.0, 0.0, 0.0]), Vec3::zero());
+    }
+
+    #[test]
+    fn to_vec3_values() {
+        assert_eq!(to_vec3([1.5, -2.5, 3.5]), Vec3::new(1.5, -2.5, 3.5));
+    }
+}
