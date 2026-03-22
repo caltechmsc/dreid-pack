@@ -15,7 +15,7 @@ pub enum Error {
     #[error("template parse error: {0}")]
     Template(String),
 
-    /// Force field parameterization failure.
-    #[error("{0}")]
+    /// Force-field parameterization failure.
+    #[error("force-field parameterization error: {0}")]
     Forge(String),
 }
