@@ -11,7 +11,7 @@ pub struct ContactGraph {
 impl ContactGraph {
     /// Constructs a contact graph from raw pairwise contacts.
     ///
-    /// Self-loops are silently dropped. Each pair is canonicalised so the
+    /// Self-loops are silently dropped. Each pair is canonicalized so the
     /// smaller index comes first; duplicates and reversed copies are removed.
     ///
     /// # Panics
