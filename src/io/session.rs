@@ -9,13 +9,11 @@ pub struct Session {
     /// Packable system (mobile residues + fixed scaffold).
     pub system: System,
     // Topology + metadata bookkeeping for biological system.
-    #[allow(dead_code)] // FIXME: Remove allow dead code once metadata is used.
     metadata: SystemMetadata,
 }
 
 impl Session {
     /// Creates a session from a `system` and its paired `metadata`.
-    #[allow(dead_code)] // FIXME: Remove allow dead code once this is used.
     pub(super) fn new(system: System, metadata: SystemMetadata) -> Self {
         debug_assert_eq!(
             system.mobile.len(),
@@ -35,7 +33,6 @@ impl Session {
     }
 
     /// Topology metadata paired with this session.
-    #[allow(dead_code)] // FIXME: Remove allow dead code once this is used.
     pub(super) fn metadata(&self) -> &SystemMetadata {
         &self.metadata
     }

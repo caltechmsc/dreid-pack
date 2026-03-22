@@ -104,7 +104,7 @@ impl Default for TopologyConfig {
 
 /// Topology template for a non-standard (HETATM) residue type.
 #[derive(Debug, Clone)]
-pub struct HeteroTemplate(#[allow(dead_code)] pub(crate) dreid_forge::io::Template); // FIXME: Remove allow dead code when this is actually used.
+pub struct HeteroTemplate(pub(crate) dreid_forge::io::Template);
 
 impl HeteroTemplate {
     /// Parses a MOL2 reader into a hetero residue template.
