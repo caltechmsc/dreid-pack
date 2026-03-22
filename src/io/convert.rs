@@ -24,13 +24,13 @@ use std::io::{BufRead, Write};
 /// Reads a biomolecular structure and builds a packing [`Session`].
 ///
 /// Parses the input PDB/mmCIF data, cleans, protonates, builds topology,
-/// parameterises with the DREIDING force field, and partitions atoms into
+/// parameterizes with the DREIDING force field, and partitions atoms into
 /// fixed scaffold and mobile sidechains.
 ///
 /// # Errors
 ///
 /// Returns [`Error::Parse`] if the structure data is malformed,
-/// [`Error::Forge`] if force-field parameterisation fails, or
+/// [`Error::Forge`] if force-field parameterization fails, or
 /// [`Error::Io`] on OS-level read failure.
 pub fn read<R: BufRead>(reader: R, fmt: Format, cfg: &ReadConfig) -> Result<Session, Error> {
     let df_sys = dreid_forge::io::BioReader::new(reader, bio_format(fmt))

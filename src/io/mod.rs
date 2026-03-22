@@ -2,9 +2,9 @@
 //!
 //! This module converts between molecular structure files and the [`Session`]
 //! type used by the packing engine. Reading parses the file, runs force-field
-//! parameterisation via `dreid-forge`, and partitions atoms into a fixed
+//! parameterization via `dreid-forge`, and partitions atoms into a fixed
 //! scaffold and a set of mobile sidechains ready for repacking. Writing
-//! reconstructs coordinates from a packed session and serialises them back to
+//! reconstructs coordinates from a packed session and serializes them back to
 //! the original file format.
 //!
 //! # Supported Formats
@@ -17,7 +17,7 @@
 //! # Entry Points
 //!
 //! - [`read()`] — Parse a structure file into a [`Session`].
-//! - [`write()`] — Serialise a [`Session`] back to a structure file.
+//! - [`write()`] — Serialize a [`Session`] back to a structure file.
 //!
 //! # Configuration
 //!
@@ -26,7 +26,7 @@
 //! - [`CleanConfig`] — Remove water, ions, and hetero residues.
 //! - [`ProtonationConfig`] — Add missing hydrogens; resolve His tautomers.
 //! - [`TopologyConfig`] — Bond perception and hetero residue templates.
-//! - [`ForceFieldConfig`] — DREIDING parameterisation and charge method.
+//! - [`ForceFieldConfig`] — DREIDING parameterization and charge method.
 
 mod config;
 mod convert;

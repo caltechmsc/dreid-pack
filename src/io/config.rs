@@ -19,7 +19,7 @@ pub struct ReadConfig {
     pub protonation: ProtonationConfig,
     /// Bond perception and hetero residue template matching.
     pub topology: TopologyConfig,
-    /// Force-field parameterisation settings.
+    /// Force-field parameterization settings.
     pub ff: ForceFieldConfig,
 }
 
@@ -48,10 +48,10 @@ pub struct ProtonationConfig {
     pub target_ph: Option<f64>,
     /// Histidine tautomer strategy.
     ///
-    /// Default [`HisStrategy::HbNetwork`] optimises tautomer selection via
+    /// Default [`HisStrategy::HbNetwork`] optimizes tautomer selection via
     /// hydrogen-bond network analysis.
     pub his_strategy: HisStrategy,
-    /// Favour doubly-protonated HIP for histidines near carboxylate groups.
+    /// Favor doubly-protonated HIP for histidines near carboxylate groups.
     ///
     /// When `true`, histidines forming salt bridges with ASP⁻, GLU⁻, or the
     /// C-terminal COO⁻ are assigned the HIP form before tautomer selection.
@@ -79,7 +79,7 @@ pub enum HisStrategy {
     Hie,
     /// Assign HID or HIE at random with equal probability.
     Random,
-    /// Optimise tautomer selection via hydrogen-bond network analysis.
+    /// Optimize tautomer selection via hydrogen-bond network analysis.
     #[default]
     HbNetwork,
 }
@@ -120,7 +120,7 @@ impl HeteroTemplate {
     }
 }
 
-/// Force-field parameterisation settings.
+/// Force-field parameterization settings.
 #[derive(Debug, Clone, Default)]
 pub struct ForceFieldConfig {
     /// Custom atom-typing rules in TOML format.
@@ -342,6 +342,6 @@ pub enum DampingStrategy {
     None,
     /// Fixed damping factor `d` where `0.0 < d ≤ 1.0`.
     Fixed(f64),
-    /// Adaptive damping — adjusts automatically based on convergence behaviour.
+    /// Adaptive damping — adjusts automatically based on convergence behavior.
     Auto { initial: f64 },
 }
