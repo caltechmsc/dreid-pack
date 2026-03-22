@@ -55,7 +55,7 @@ impl Vec3 {
         self.len_sq().sqrt()
     }
 
-    /// Returns the unit vector in the same direction. Behaviour is unspecified for
+    /// Returns the unit vector in the same direction. Behavior is unspecified for
     /// zero-length vectors.
     #[inline(always)]
     pub fn normalize(self) -> Vec3 {
