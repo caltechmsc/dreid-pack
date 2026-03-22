@@ -8,7 +8,7 @@ pub use dreid_forge::{BondOrder, Element, ResidueCategory, ResiduePosition, Stan
 pub struct Session {
     /// Packable system (mobile residues + fixed scaffold).
     pub system: System,
-    // Topology + metadata bookkeeping for biological system.
+    /// Topology + metadata bookkeeping for biological system.
     metadata: SystemMetadata,
 }
 
