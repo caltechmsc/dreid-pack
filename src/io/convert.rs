@@ -1155,19 +1155,6 @@ mod tests {
         bio
     }
 
-    fn group_with(indices: Vec<usize>) -> ResidueGroup {
-        ResidueGroup {
-            chain_id: "A".into(),
-            residue_id: 1,
-            insertion_code: None,
-            residue_name: "SER".into(),
-            standard_name: None,
-            category: ResidueCategory::Standard,
-            position: ResiduePosition::None,
-            atom_indices: indices,
-        }
-    }
-
     fn mobile_meta(sc: Vec<usize>) -> MobileMetadata {
         MobileMetadata {
             group_idx: 0,
@@ -1179,6 +1166,48 @@ mod tests {
         }
     }
 
+    fn group_at(chain: &str, resid: i32, name: &str, indices: Vec<usize>) -> ResidueGroup {
+        ResidueGroup {
+            chain_id: chain.into(),
+            residue_id: resid,
+            insertion_code: None,
+            residue_name: name.into(),
+            standard_name: None,
+            category: ResidueCategory::Standard,
+            position: ResiduePosition::None,
+            atom_indices: indices,
+        }
+    }
+
+    fn group_hetero(chain: &str, resid: i32, name: &str, indices: Vec<usize>) -> ResidueGroup {
+        ResidueGroup {
+            chain_id: chain.into(),
+            residue_id: resid,
+            insertion_code: None,
+            residue_name: name.into(),
+            standard_name: None,
+            category: ResidueCategory::Hetero,
+            position: ResiduePosition::None,
+            atom_indices: indices,
+        }
+    }
+
+    fn atom(pos: [f64; 3]) -> dreid_forge::Atom {
+        dreid_forge::Atom::new(dreid_forge::Element::C, pos)
+    }
+
+    fn hydrogen(pos: [f64; 3]) -> dreid_forge::Atom {
+        dreid_forge::Atom::new(dreid_forge::Element::H, pos)
+    }
+
+    fn sel(chain: &str, resid: i32) -> ResidueSelector {
+        ResidueSelector {
+            chain_id: chain.into(),
+            residue_id: resid,
+            insertion_code: None,
+        }
+    }
+
     #[test]
     fn bio_format_maps_pdb() {
         assert_eq!(bio_format(Format::Pdb), dreid_forge::io::Format::Pdb);
@@ -1187,59 +1216,6 @@ mod tests {
     #[test]
     fn bio_format_maps_mmcif() {
         assert_eq!(bio_format(Format::Mmcif), dreid_forge::io::Format::Mmcif);
-    }
-
-    #[test]
-    fn residue_name_all_mappings_correct() {
-        let cases = [
-            ("GLY", ResidueType::Gly),
-            ("ALA", ResidueType::Ala),
-            ("VAL", ResidueType::Val),
-            ("CYM", ResidueType::Cym),
-            ("CYX", ResidueType::Cyx),
-            ("CYS", ResidueType::Cys),
-            ("SER", ResidueType::Ser),
-            ("THR", ResidueType::Thr),
-            ("PRO", ResidueType::Pro),
-            ("ASP", ResidueType::Asp),
-            ("ASN", ResidueType::Asn),
-            ("ILE", ResidueType::Ile),
-            ("LEU", ResidueType::Leu),
-            ("PHE", ResidueType::Phe),
-            ("TYM", ResidueType::Tym),
-            ("HID", ResidueType::Hid),
-            ("HIE", ResidueType::Hie),
-            ("HIP", ResidueType::Hip),
-            ("TRP", ResidueType::Trp),
-            ("ASH", ResidueType::Ash),
-            ("TYR", ResidueType::Tyr),
-            ("MET", ResidueType::Met),
-            ("GLU", ResidueType::Glu),
-            ("GLN", ResidueType::Gln),
-            ("GLH", ResidueType::Glh),
-            ("ARG", ResidueType::Arg),
-            ("ARN", ResidueType::Arn),
-            ("LYN", ResidueType::Lyn),
-            ("LYS", ResidueType::Lys),
-        ];
-        for (name, expected) in cases {
-            assert_eq!(residue_name_to_type(name), Some(expected), "{name}");
-        }
-    }
-
-    #[test]
-    fn residue_name_unknown_returns_none() {
-        assert!(residue_name_to_type("XYZ").is_none());
-        assert!(residue_name_to_type("").is_none());
-        assert!(residue_name_to_type("HOH").is_none());
-        assert!(residue_name_to_type("ACE").is_none());
-    }
-
-    #[test]
-    fn residue_name_case_sensitive() {
-        assert!(residue_name_to_type("gly").is_none());
-        assert!(residue_name_to_type("Gly").is_none());
-        assert!(residue_name_to_type("GLy").is_none());
     }
 
     #[test]
@@ -1327,20 +1303,73 @@ mod tests {
     }
 
     #[test]
+    fn residue_name_all_mappings_correct() {
+        let cases = [
+            ("GLY", ResidueType::Gly),
+            ("ALA", ResidueType::Ala),
+            ("VAL", ResidueType::Val),
+            ("CYM", ResidueType::Cym),
+            ("CYX", ResidueType::Cyx),
+            ("CYS", ResidueType::Cys),
+            ("SER", ResidueType::Ser),
+            ("THR", ResidueType::Thr),
+            ("PRO", ResidueType::Pro),
+            ("ASP", ResidueType::Asp),
+            ("ASN", ResidueType::Asn),
+            ("ILE", ResidueType::Ile),
+            ("LEU", ResidueType::Leu),
+            ("PHE", ResidueType::Phe),
+            ("TYM", ResidueType::Tym),
+            ("HID", ResidueType::Hid),
+            ("HIE", ResidueType::Hie),
+            ("HIP", ResidueType::Hip),
+            ("TRP", ResidueType::Trp),
+            ("ASH", ResidueType::Ash),
+            ("TYR", ResidueType::Tyr),
+            ("MET", ResidueType::Met),
+            ("GLU", ResidueType::Glu),
+            ("GLN", ResidueType::Gln),
+            ("GLH", ResidueType::Glh),
+            ("ARG", ResidueType::Arg),
+            ("ARN", ResidueType::Arn),
+            ("LYN", ResidueType::Lyn),
+            ("LYS", ResidueType::Lys),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(residue_name_to_type(name), Some(expected), "{name}");
+        }
+    }
+
+    #[test]
+    fn residue_name_unknown_returns_none() {
+        assert!(residue_name_to_type("XYZ").is_none());
+        assert!(residue_name_to_type("").is_none());
+        assert!(residue_name_to_type("HOH").is_none());
+        assert!(residue_name_to_type("ACE").is_none());
+    }
+
+    #[test]
+    fn residue_name_case_sensitive() {
+        assert!(residue_name_to_type("gly").is_none());
+        assert!(residue_name_to_type("Gly").is_none());
+        assert!(residue_name_to_type("GLy").is_none());
+    }
+
+    #[test]
     fn find_backbone_present() {
         let bio = bio_with(vec![
             ai("N", "SER", 1, "A"),
             ai("CA", "SER", 1, "A"),
             ai("C", "SER", 1, "A"),
         ]);
-        let g = group_with(vec![0, 1, 2]);
+        let g = group_at("A", 1, "SER", vec![0, 1, 2]);
         assert_eq!(find_backbone_atom(&g, &bio, "CA"), Some(1));
     }
 
     #[test]
     fn find_backbone_absent() {
         let bio = bio_with(vec![ai("N", "SER", 1, "A"), ai("CA", "SER", 1, "A")]);
-        let g = group_with(vec![0, 1]);
+        let g = group_at("A", 1, "SER", vec![0, 1]);
         assert_eq!(find_backbone_atom(&g, &bio, "CB"), None);
     }
 
@@ -1351,8 +1380,372 @@ mod tests {
             ai("N", "SER", 1, "A"),
             ai("CA", "SER", 1, "A"),
         ]);
-        let g = group_with(vec![0, 1, 2]);
+        let g = group_at("A", 1, "SER", vec![0, 1, 2]);
         assert_eq!(find_backbone_atom(&g, &bio, "CA"), Some(0));
+    }
+
+    #[test]
+    fn apply_scope_full_passthrough() {
+        let candidates = vec![(0, ResidueType::Ser), (1, ResidueType::Val)];
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("A", 2, "VAL", vec![1]),
+        ];
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([1.0, 0.0, 0.0])];
+        let result = apply_scope(candidates.clone(), &groups, &atoms, &PackingScope::Full).unwrap();
+        assert_eq!(result, candidates);
+    }
+
+    #[test]
+    fn filter_list_all_match() {
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("A", 2, "VAL", vec![1]),
+        ];
+        let candidates = vec![(0, ResidueType::Ser), (1, ResidueType::Val)];
+        let selectors = [sel("A", 1), sel("A", 2)];
+        let result = filter_list(candidates, &groups, &selectors);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn filter_list_partial_match() {
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("A", 2, "VAL", vec![1]),
+        ];
+        let candidates = vec![(0, ResidueType::Ser), (1, ResidueType::Val)];
+        let selectors = [sel("A", 2)];
+        let result = filter_list(candidates, &groups, &selectors);
+        assert_eq!(result, vec![(1, ResidueType::Val)]);
+    }
+
+    #[test]
+    fn filter_list_none_match() {
+        let groups = [group_at("A", 1, "SER", vec![0])];
+        let candidates = vec![(0, ResidueType::Ser)];
+        let selectors = [sel("B", 99)];
+        let result = filter_list(candidates, &groups, &selectors);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_list_respects_insertion_code() {
+        let mut g = group_at("A", 1, "SER", vec![0]);
+        g.insertion_code = Some('A');
+        let groups = [g];
+        let candidates = vec![(0, ResidueType::Ser)];
+
+        let miss = filter_list(candidates.clone(), &groups, &[sel("A", 1)]);
+        assert!(miss.is_empty());
+
+        let hit = ResidueSelector {
+            chain_id: "A".into(),
+            residue_id: 1,
+            insertion_code: Some('A'),
+        };
+        let got = filter_list(candidates, &groups, &[hit]);
+        assert_eq!(got.len(), 1);
+    }
+
+    #[test]
+    fn filter_pocket_zero_radius() {
+        let err = filter_pocket(vec![], &[], &[], &sel("A", 1), 0.0).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_pocket_negative_radius() {
+        let err = filter_pocket(vec![], &[], &[], &sel("A", 1), -1.0).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_pocket_infinite_radius() {
+        let err = filter_pocket(vec![], &[], &[], &sel("A", 1), f32::INFINITY).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_pocket_nan_radius() {
+        let err = filter_pocket(vec![], &[], &[], &sel("A", 1), f32::NAN).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_pocket_anchor_not_found() {
+        let groups = [group_at("A", 1, "SER", vec![0])];
+        let atoms = [atom([0.0, 0.0, 0.0])];
+        let err = filter_pocket(vec![], &groups, &atoms, &sel("B", 99), 5.0).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_pocket_anchor_only_hydrogen() {
+        let groups = [
+            group_hetero("A", 100, "LIG", vec![0]),
+            group_at("A", 1, "SER", vec![1]),
+        ];
+        let atoms = [hydrogen([0.0, 0.0, 0.0]), atom([3.0, 0.0, 0.0])];
+        let candidates = vec![(1, ResidueType::Ser)];
+        let err = filter_pocket(candidates, &groups, &atoms, &sel("A", 100), 5.0).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_pocket_keeps_nearby() {
+        let groups = [
+            group_hetero("A", 100, "LIG", vec![0]),
+            group_at("A", 1, "SER", vec![1]),
+        ];
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([3.0, 0.0, 0.0])];
+        let candidates = vec![(1, ResidueType::Ser)];
+        let result = filter_pocket(candidates, &groups, &atoms, &sel("A", 100), 5.0).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_pocket_excludes_distant() {
+        let groups = [
+            group_hetero("A", 100, "LIG", vec![0]),
+            group_at("A", 1, "SER", vec![1]),
+        ];
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([10.0, 0.0, 0.0])];
+        let candidates = vec![(1, ResidueType::Ser)];
+        let result = filter_pocket(candidates, &groups, &atoms, &sel("A", 100), 5.0).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_pocket_mixed_distances() {
+        let groups = [
+            group_hetero("A", 100, "LIG", vec![0]),
+            group_at("A", 1, "SER", vec![1]),
+            group_at("A", 2, "SER", vec![2]),
+        ];
+        let atoms = [
+            atom([0.0, 0.0, 0.0]),
+            atom([3.0, 0.0, 0.0]),
+            atom([10.0, 0.0, 0.0]),
+        ];
+        let candidates = vec![(1, ResidueType::Ser), (2, ResidueType::Ser)];
+        let result = filter_pocket(candidates, &groups, &atoms, &sel("A", 100), 5.0).unwrap();
+        assert_eq!(result, vec![(1, ResidueType::Ser)]);
+    }
+
+    #[test]
+    fn filter_interface_empty_group() {
+        let err = filter_interface(vec![], &[], &[], &[vec![], vec!["B".into()]], 5.0).unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_interface_zero_cutoff() {
+        let err = filter_interface(vec![], &[], &[], &[vec!["A".into()], vec!["B".into()]], 0.0)
+            .unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_interface_groups_overlap() {
+        let groups = [group_at("A", 1, "SER", vec![0])];
+        let atoms = [atom([0.0, 0.0, 0.0])];
+        let err = filter_interface(
+            vec![],
+            &groups,
+            &atoms,
+            &[vec!["A".into()], vec!["A".into()]],
+            5.0,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_interface_unknown_chain() {
+        let groups = [group_at("A", 1, "SER", vec![0])];
+        let atoms = [atom([0.0, 0.0, 0.0])];
+        let err = filter_interface(
+            vec![],
+            &groups,
+            &atoms,
+            &[vec!["A".into()], vec!["Z".into()]],
+            5.0,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Scope(_)));
+    }
+
+    #[test]
+    fn filter_interface_keeps_contacts() {
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("B", 1, "SER", vec![1]),
+        ];
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([3.0, 0.0, 0.0])];
+        let candidates = vec![(0, ResidueType::Ser), (1, ResidueType::Ser)];
+        let result = filter_interface(
+            candidates,
+            &groups,
+            &atoms,
+            &[vec!["A".into()], vec!["B".into()]],
+            5.0,
+        )
+        .unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn filter_interface_excludes_no_contacts() {
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("B", 1, "SER", vec![1]),
+        ];
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([100.0, 0.0, 0.0])];
+        let candidates = vec![(0, ResidueType::Ser), (1, ResidueType::Ser)];
+        let result = filter_interface(
+            candidates,
+            &groups,
+            &atoms,
+            &[vec!["A".into()], vec!["B".into()]],
+            5.0,
+        )
+        .unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_interface_both_sides() {
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("A", 2, "SER", vec![1]),
+            group_at("B", 1, "SER", vec![2]),
+        ];
+        let atoms = [
+            atom([0.0, 0.0, 0.0]),
+            atom([100.0, 0.0, 0.0]),
+            atom([3.0, 0.0, 0.0]),
+        ];
+        let candidates = vec![
+            (0, ResidueType::Ser),
+            (1, ResidueType::Ser),
+            (2, ResidueType::Ser),
+        ];
+        let result = filter_interface(
+            candidates,
+            &groups,
+            &atoms,
+            &[vec!["A".into()], vec!["B".into()]],
+            5.0,
+        )
+        .unwrap();
+        assert_eq!(result, vec![(0, ResidueType::Ser), (2, ResidueType::Ser)]);
+    }
+
+    #[test]
+    fn filter_interface_excludes_unaffiliated_chain() {
+        let groups = [
+            group_at("A", 1, "SER", vec![0]),
+            group_at("B", 1, "SER", vec![1]),
+            group_at("C", 1, "SER", vec![2]),
+        ];
+        let atoms = [
+            atom([0.0, 0.0, 0.0]),
+            atom([3.0, 0.0, 0.0]),
+            atom([1.0, 0.0, 0.0]),
+        ];
+        let candidates = vec![
+            (0, ResidueType::Ser),
+            (1, ResidueType::Ser),
+            (2, ResidueType::Ser),
+        ];
+        let result = filter_interface(
+            candidates,
+            &groups,
+            &atoms,
+            &[vec!["A".into()], vec!["B".into()]],
+            5.0,
+        )
+        .unwrap();
+        assert_eq!(result, vec![(0, ResidueType::Ser), (1, ResidueType::Ser)]);
+    }
+
+    #[test]
+    fn build_cell_list_empty() {
+        let cells = build_cell_list(std::iter::empty(), &[], 5.0);
+        assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn build_cell_list_skips_hydrogen() {
+        let atoms = [hydrogen([0.0, 0.0, 0.0]), hydrogen([1.0, 1.0, 1.0])];
+        let cells = build_cell_list(0..2, &atoms, 5.0);
+        assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn build_cell_list_bins_heavy_atoms() {
+        let atoms = [
+            atom([0.5, 0.5, 0.5]),
+            atom([5.5, 0.5, 0.5]),
+            hydrogen([0.5, 0.5, 0.5]),
+        ];
+        let cells = build_cell_list(0..3, &atoms, 5.0);
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[&(0, 0, 0)].len(), 1);
+        assert_eq!(cells[&(1, 0, 0)].len(), 1);
+    }
+
+    #[test]
+    fn any_heavy_atom_near_within() {
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([1.0, 0.0, 0.0])];
+        let cells = build_cell_list(0..1, &atoms, 5.0);
+        let g = group_at("A", 1, "SER", vec![1]);
+        assert!(any_heavy_atom_near(&g, &atoms, &cells, 5.0, 4.0));
+    }
+
+    #[test]
+    fn any_heavy_atom_near_outside() {
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([10.0, 0.0, 0.0])];
+        let cells = build_cell_list(0..1, &atoms, 5.0);
+        let g = group_at("A", 1, "SER", vec![1]);
+        assert!(!any_heavy_atom_near(&g, &atoms, &cells, 5.0, 4.0));
+    }
+
+    #[test]
+    fn any_heavy_atom_near_ignores_hydrogen() {
+        let atoms = [atom([0.0, 0.0, 0.0]), hydrogen([0.5, 0.0, 0.0])];
+        let cells = build_cell_list(0..1, &atoms, 5.0);
+        let g = group_at("A", 1, "SER", vec![1]);
+        assert!(!any_heavy_atom_near(&g, &atoms, &cells, 5.0, 4.0));
+    }
+
+    #[test]
+    fn any_heavy_atom_near_cross_cell() {
+        let atoms = [atom([2.0, 0.0, 0.0]), atom([6.0, 0.0, 0.0])];
+        let cells = build_cell_list(0..1, &atoms, 5.0);
+        let g = group_at("A", 1, "SER", vec![1]);
+        assert!(any_heavy_atom_near(&g, &atoms, &cells, 5.0, 25.0));
+    }
+
+    #[test]
+    fn any_heavy_atom_near_exact_boundary() {
+        let atoms = [atom([0.0, 0.0, 0.0]), atom([3.0, 0.0, 0.0])];
+        let cells = build_cell_list(0..1, &atoms, 5.0);
+        let g = group_at("A", 1, "SER", vec![1]);
+        assert!(any_heavy_atom_near(&g, &atoms, &cells, 5.0, 9.0));
+    }
+
+    #[test]
+    fn any_heavy_atom_near_multi_atom_group() {
+        let atoms = [
+            atom([0.0, 0.0, 0.0]),
+            atom([10.0, 0.0, 0.0]),
+            atom([1.0, 0.0, 0.0]),
+        ];
+        let cells = build_cell_list(0..1, &atoms, 5.0);
+        let g = group_at("A", 1, "SER", vec![1, 2]);
+        assert!(any_heavy_atom_near(&g, &atoms, &cells, 5.0, 4.0));
     }
 
     #[test]
@@ -1609,14 +2002,14 @@ mod tests {
             bonds[0].a,
             AtomRef::Mobile {
                 residue: 0,
-                local: 0,
+                local: 0
             }
         );
         assert_eq!(
             bonds[0].b,
             AtomRef::Mobile {
                 residue: 0,
-                local: 1,
+                local: 1
             }
         );
         assert_eq!(bonds[0].order, BondOrder::Double);
@@ -1643,7 +2036,7 @@ mod tests {
             bonds[0].b,
             AtomRef::Mobile {
                 residue: 0,
-                local: 0,
+                local: 0
             }
         );
         assert_eq!(bonds[0].order, BondOrder::Single);
@@ -1716,5 +2109,62 @@ mod tests {
     #[test]
     fn to_vec3_values() {
         assert_eq!(to_vec3([1.5, -2.5, 3.5]), Vec3::new(1.5, -2.5, 3.5));
+    }
+
+    #[test]
+    fn dist_sq_same_point() {
+        assert_eq!(dist_sq([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]), 0.0);
+    }
+
+    #[test]
+    fn dist_sq_unit_axis() {
+        assert_eq!(dist_sq([1.0, 0.0, 0.0], [0.0, 0.0, 0.0]), 1.0);
+    }
+
+    #[test]
+    fn dist_sq_symmetric() {
+        let a = [1.0, 2.0, 3.0];
+        let b = [4.0, 5.0, 6.0];
+        assert_eq!(dist_sq(a, b), dist_sq(b, a));
+    }
+
+    #[test]
+    fn dist_sq_diagonal() {
+        assert_eq!(dist_sq([1.0, 1.0, 1.0], [0.0, 0.0, 0.0]), 3.0);
+    }
+
+    #[test]
+    fn cell_key_origin() {
+        assert_eq!(cell_key([0.5, 0.5, 0.5], 1.0), (0, 0, 0));
+    }
+
+    #[test]
+    fn cell_key_positive() {
+        assert_eq!(cell_key([1.5, 2.5, 3.5], 1.0), (1, 2, 3));
+    }
+
+    #[test]
+    fn cell_key_negative() {
+        assert_eq!(cell_key([-0.5, -1.5, -2.5], 1.0), (-1, -2, -3));
+    }
+
+    #[test]
+    fn cell_key_boundary() {
+        assert_eq!(cell_key([1.0, 0.0, 0.0], 1.0), (1, 0, 0));
+    }
+
+    #[test]
+    fn fmt_selector_without_icode() {
+        assert_eq!(fmt_selector(&sel("A", 42)), "A 42");
+    }
+
+    #[test]
+    fn fmt_selector_with_icode() {
+        let s = ResidueSelector {
+            chain_id: "B".into(),
+            residue_id: 5,
+            insertion_code: Some('X'),
+        };
+        assert_eq!(fmt_selector(&s), "B 5X");
     }
 }
