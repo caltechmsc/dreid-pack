@@ -1,7 +1,8 @@
 use super::config::{
     BasisType, ChargeConfig, CleanConfig, DampingStrategy, EmbeddedQeqConfig, ForceFieldConfig,
-    Format, HeteroQeqMethod, HisStrategy, NucleicScheme, ProteinScheme, ProtonationConfig,
-    QeqConfig, ReadConfig, SolverOptions, TopologyConfig, VdwPotential, WaterScheme,
+    Format, HeteroQeqMethod, HisStrategy, NucleicScheme, PackingScope, ProteinScheme,
+    ProtonationConfig, QeqConfig, ReadConfig, ResidueSelector, SolverOptions, TopologyConfig,
+    VdwPotential, WaterScheme,
 };
 use super::error::Error;
 use super::order;
@@ -30,7 +31,8 @@ use std::io::{BufRead, Write};
 /// # Errors
 ///
 /// Returns [`Error::Parse`] if the structure data is malformed,
-/// [`Error::Forge`] if force-field parameterization fails, or
+/// [`Error::Forge`] if force-field parameterization fails,
+/// [`Error::Scope`] if the packing scope is invalid, or
 /// [`Error::Io`] on OS-level read failure.
 pub fn read<R: BufRead>(reader: R, fmt: Format, cfg: &ReadConfig) -> Result<Session, Error> {
     let df_sys = dreid_forge::io::BioReader::new(reader, bio_format(fmt))
@@ -43,7 +45,7 @@ pub fn read<R: BufRead>(reader: R, fmt: Format, cfg: &ReadConfig) -> Result<Sess
     let forged = dreid_forge::forge(&df_sys, &to_forge_config(&cfg.ff))
         .map_err(|e| Error::Forge(e.to_string()))?;
 
-    build(forged)
+    build(forged, &cfg.scope)
 }
 
 /// Writes a packing [`Session`] back to a biomolecular structure file.
@@ -236,7 +238,7 @@ struct MobileMetadata {
 // Group B — ForgedSystem -> Session (read path)
 // ---------------------------------------------------------------------------
 
-fn build(forged: ForgedSystem) -> Result<Session, Error> {
+fn build(forged: ForgedSystem, scope: &PackingScope) -> Result<Session, Error> {
     let bio = forged
         .system
         .bio_metadata
@@ -244,7 +246,7 @@ fn build(forged: ForgedSystem) -> Result<Session, Error> {
         .ok_or_else(|| Error::Parse("input system lacks biological metadata".into()))?;
 
     let groups = group_residues(bio);
-    let mobile_metas = classify_mobile(&groups, bio)?;
+    let mobile_metas = classify_mobile(&groups, bio, &forged.system.atoms, scope)?;
     let n_atoms = forged.system.atoms.len();
     let atom_to_ref = build_atom_to_ref(n_atoms, &mobile_metas);
     let (ff, h_types) = build_ff(forged.atom_types.len(), &forged.potentials)?;
@@ -299,18 +301,27 @@ fn group_residues(bio: &BioMetadata) -> Vec<ResidueGroup> {
 fn classify_mobile(
     groups: &[ResidueGroup],
     bio: &BioMetadata,
+    atoms: &[dreid_forge::Atom],
+    scope: &PackingScope,
 ) -> Result<Vec<MobileMetadata>, Error> {
-    let mut metas = Vec::new();
+    let candidates: Vec<(usize, ResidueType)> = groups
+        .iter()
+        .enumerate()
+        .filter_map(|(gi, g)| {
+            if g.category != ResidueCategory::Standard {
+                return None;
+            }
+            residue_name_to_type(&g.residue_name)
+                .filter(|rt| rt.is_packable())
+                .map(|rt| (gi, rt))
+        })
+        .collect();
 
-    for (gi, g) in groups.iter().enumerate() {
-        if g.category != ResidueCategory::Standard {
-            continue;
-        }
+    let selected = apply_scope(candidates, groups, atoms, scope)?;
 
-        let rt = match residue_name_to_type(&g.residue_name) {
-            Some(rt) if rt.is_packable() => rt,
-            _ => continue,
-        };
+    let mut metas = Vec::with_capacity(selected.len());
+    for (gi, rt) in selected {
+        let g = &groups[gi];
 
         let n_idx = find_backbone_atom(g, bio, "N").ok_or_else(|| {
             Error::Parse(format!(
@@ -359,6 +370,12 @@ fn classify_mobile(
         });
     }
 
+    if metas.is_empty() {
+        return Err(Error::Scope(
+            "no mobile residues selected by packing scope".into(),
+        ));
+    }
+
     Ok(metas)
 }
 
@@ -403,6 +420,201 @@ fn find_backbone_atom(group: &ResidueGroup, bio: &BioMetadata, name: &str) -> Op
         .iter()
         .copied()
         .find(|&i| bio.atom_info[i].atom_name == name)
+}
+
+fn apply_scope(
+    candidates: Vec<(usize, ResidueType)>,
+    groups: &[ResidueGroup],
+    atoms: &[dreid_forge::Atom],
+    scope: &PackingScope,
+) -> Result<Vec<(usize, ResidueType)>, Error> {
+    match scope {
+        PackingScope::Full => Ok(candidates),
+        PackingScope::Pocket { anchor, radius } => {
+            filter_pocket(candidates, groups, atoms, anchor, *radius)
+        }
+        PackingScope::Interface {
+            groups: chain_groups,
+            cutoff,
+        } => filter_interface(candidates, groups, atoms, chain_groups, *cutoff),
+        PackingScope::List(selectors) => Ok(filter_list(candidates, groups, selectors)),
+    }
+}
+
+fn filter_list(
+    candidates: Vec<(usize, ResidueType)>,
+    groups: &[ResidueGroup],
+    selectors: &[ResidueSelector],
+) -> Vec<(usize, ResidueType)> {
+    let set: HashSet<(&str, i32, Option<char>)> = selectors
+        .iter()
+        .map(|s| (s.chain_id.as_str(), s.residue_id, s.insertion_code))
+        .collect();
+    candidates
+        .into_iter()
+        .filter(|&(gi, _)| {
+            let g = &groups[gi];
+            set.contains(&(g.chain_id.as_str(), g.residue_id, g.insertion_code))
+        })
+        .collect()
+}
+
+fn filter_pocket(
+    candidates: Vec<(usize, ResidueType)>,
+    groups: &[ResidueGroup],
+    atoms: &[dreid_forge::Atom],
+    anchor: &ResidueSelector,
+    radius: f32,
+) -> Result<Vec<(usize, ResidueType)>, Error> {
+    if !radius.is_finite() || radius <= 0.0 {
+        return Err(Error::Scope(
+            "pocket radius must be finite and positive".into(),
+        ));
+    }
+
+    let anchor_group = groups
+        .iter()
+        .find(|g| {
+            g.chain_id == anchor.chain_id
+                && g.residue_id == anchor.residue_id
+                && g.insertion_code == anchor.insertion_code
+        })
+        .ok_or_else(|| {
+            Error::Scope(format!(
+                "anchor residue {} not found in structure",
+                fmt_selector(anchor),
+            ))
+        })?;
+
+    let cell_size = radius as f64;
+    let cutoff_sq = (radius as f64) * (radius as f64);
+    let cells = build_cell_list(anchor_group.atom_indices.iter().copied(), atoms, cell_size);
+
+    if cells.is_empty() {
+        return Err(Error::Scope("anchor residue has no heavy atoms".into()));
+    }
+
+    Ok(candidates
+        .into_iter()
+        .filter(|&(gi, _)| any_heavy_atom_near(&groups[gi], atoms, &cells, cell_size, cutoff_sq))
+        .collect())
+}
+
+fn filter_interface(
+    candidates: Vec<(usize, ResidueType)>,
+    groups: &[ResidueGroup],
+    atoms: &[dreid_forge::Atom],
+    chain_groups: &[Vec<String>; 2],
+    cutoff: f32,
+) -> Result<Vec<(usize, ResidueType)>, Error> {
+    if chain_groups[0].is_empty() || chain_groups[1].is_empty() {
+        return Err(Error::Scope("interface group must not be empty".into()));
+    }
+    if !cutoff.is_finite() || cutoff <= 0.0 {
+        return Err(Error::Scope(
+            "interface cutoff must be finite and positive".into(),
+        ));
+    }
+
+    let set_a: HashSet<&str> = chain_groups[0].iter().map(|s| s.as_str()).collect();
+    let set_b: HashSet<&str> = chain_groups[1].iter().map(|s| s.as_str()).collect();
+
+    for chain in &set_a {
+        if set_b.contains(chain) {
+            return Err(Error::Scope(format!(
+                "chain {chain:?} appears in both interface groups",
+            )));
+        }
+    }
+
+    let all_chains: HashSet<&str> = groups.iter().map(|g| g.chain_id.as_str()).collect();
+    for chain in set_a.iter().chain(set_b.iter()) {
+        if !all_chains.contains(chain) {
+            return Err(Error::Scope(format!(
+                "chain {chain:?} not found in structure",
+            )));
+        }
+    }
+
+    let cell_size = cutoff as f64;
+    let cutoff_sq = (cutoff as f64) * (cutoff as f64);
+
+    let cells_a = build_cell_list(
+        groups
+            .iter()
+            .filter(|g| set_a.contains(g.chain_id.as_str()))
+            .flat_map(|g| g.atom_indices.iter().copied()),
+        atoms,
+        cell_size,
+    );
+    let cells_b = build_cell_list(
+        groups
+            .iter()
+            .filter(|g| set_b.contains(g.chain_id.as_str()))
+            .flat_map(|g| g.atom_indices.iter().copied()),
+        atoms,
+        cell_size,
+    );
+
+    Ok(candidates
+        .into_iter()
+        .filter(|&(gi, _)| {
+            let chain = groups[gi].chain_id.as_str();
+            if set_a.contains(chain) {
+                any_heavy_atom_near(&groups[gi], atoms, &cells_b, cell_size, cutoff_sq)
+            } else if set_b.contains(chain) {
+                any_heavy_atom_near(&groups[gi], atoms, &cells_a, cell_size, cutoff_sq)
+            } else {
+                false
+            }
+        })
+        .collect())
+}
+
+fn build_cell_list(
+    atom_indices: impl Iterator<Item = usize>,
+    atoms: &[dreid_forge::Atom],
+    cell_size: f64,
+) -> HashMap<(i32, i32, i32), Vec<[f64; 3]>> {
+    let mut cells: HashMap<(i32, i32, i32), Vec<[f64; 3]>> = HashMap::new();
+    for i in atom_indices {
+        if atoms[i].element == dreid_forge::Element::H {
+            continue;
+        }
+        let pos = atoms[i].position;
+        cells.entry(cell_key(pos, cell_size)).or_default().push(pos);
+    }
+    cells
+}
+
+fn any_heavy_atom_near(
+    group: &ResidueGroup,
+    atoms: &[dreid_forge::Atom],
+    cells: &HashMap<(i32, i32, i32), Vec<[f64; 3]>>,
+    cell_size: f64,
+    cutoff_sq: f64,
+) -> bool {
+    for &ai in &group.atom_indices {
+        if atoms[ai].element == dreid_forge::Element::H {
+            continue;
+        }
+        let pos = atoms[ai].position;
+        let (cx, cy, cz) = cell_key(pos, cell_size);
+        for dz in -1..=1 {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    if let Some(bucket) = cells.get(&(cx + dx, cy + dy, cz + dz)) {
+                        for &other in bucket {
+                            if dist_sq(pos, other) <= cutoff_sq {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn build_atom_to_ref(n_atoms: usize, mobile_metas: &[MobileMetadata]) -> Vec<AtomRef> {
@@ -856,7 +1068,7 @@ fn reconstruct(session: &Session) -> dreid_forge::System {
 }
 
 // ---------------------------------------------------------------------------
-// Group D — math helpers
+// Group D — pure helpers
 // ---------------------------------------------------------------------------
 
 fn dihedral(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> f32 {
@@ -873,6 +1085,28 @@ fn dihedral(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> f32 {
 
 fn to_vec3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
+}
+
+fn dist_sq(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    let dz = a[2] - b[2];
+    dx * dx + dy * dy + dz * dz
+}
+
+fn cell_key(pos: [f64; 3], cell_size: f64) -> (i32, i32, i32) {
+    (
+        (pos[0] / cell_size).floor() as i32,
+        (pos[1] / cell_size).floor() as i32,
+        (pos[2] / cell_size).floor() as i32,
+    )
+}
+
+fn fmt_selector(s: &ResidueSelector) -> String {
+    match s.insertion_code {
+        Some(ic) => format!("{} {}{}", s.chain_id, s.residue_id, ic),
+        None => format!("{} {}", s.chain_id, s.residue_id),
+    }
 }
 
 #[cfg(test)]
