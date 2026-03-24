@@ -27,6 +27,7 @@
 //! - [`ProtonationConfig`] — Add missing hydrogens; resolve His tautomers.
 //! - [`TopologyConfig`] — Bond perception and hetero residue templates.
 //! - [`ForceFieldConfig`] — DREIDING parameterization and charge method.
+//! - [`PackingScope`] — Which residues are mobile (full, pocket, interface, list).
 
 mod config;
 mod convert;
@@ -37,8 +38,8 @@ mod session;
 pub use config::{
     BasisType, ChargeConfig, CleanConfig, DampingStrategy, EmbeddedQeqConfig, ForceFieldConfig,
     Format, HeteroChargeConfig, HeteroQeqMethod, HeteroTemplate, HisStrategy, NucleicScheme,
-    ProteinScheme, ProtonationConfig, QeqConfig, ReadConfig, ResidueSelector, SolverOptions,
-    TopologyConfig, VdwPotential, WaterScheme,
+    PackingScope, ProteinScheme, ProtonationConfig, QeqConfig, ReadConfig, ResidueSelector,
+    SolverOptions, TopologyConfig, VdwPotential, WaterScheme,
 };
 pub use convert::{read, write};
 pub use error::Error;
