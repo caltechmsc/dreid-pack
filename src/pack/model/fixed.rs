@@ -25,14 +25,14 @@ pub struct FixedAtoms<'a> {
 }
 
 impl<'a> FixedAtoms<'a> {
-    /// Borrows `pool` and builds the spatial index with `cell_size = vdw_cutoff`.
+    /// Borrows `pool` and builds the spatial index with the given `cell_size`.
     ///
     /// # Panics
     ///
-    /// Panics if atom count exceeds `u32::MAX`, if `vdw_cutoff ≤ 0`, or if
+    /// Panics if atom count exceeds `u32::MAX`, if `cell_size ≤ 0`, or if
     /// `pool.types`, `pool.charges`, or `pool.donor_for_h` differ in length
     /// from `pool.positions`.
-    pub fn build(pool: &'a FixedAtomPool, vdw_cutoff: f32) -> Self {
+    pub fn build(pool: &'a FixedAtomPool, cell_size: f32) -> Self {
         let n = pool.positions.len();
         assert!(
             n <= u32::MAX as usize,
@@ -51,7 +51,7 @@ impl<'a> FixedAtoms<'a> {
                 .copied()
                 .enumerate()
                 .map(|(i, pos)| (pos, i as u32)),
-            vdw_cutoff,
+            cell_size,
         );
         Self {
             positions: &pool.positions,
