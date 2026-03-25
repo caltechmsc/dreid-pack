@@ -1,4 +1,6 @@
 use crate::model::types::Vec3;
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Uniform cubic spatial grid.
 ///
@@ -9,21 +11,23 @@ pub struct SpatialGrid<T> {
     origin: Vec3,
     dims: [usize; 3],
     offsets: Vec<u32>,
-    indices: Vec<u32>,
     items: Vec<(Vec3, T)>,
 }
 
 impl<T: Copy> SpatialGrid<T> {
     /// Constructs a grid from `(position, payload)` pairs.
     ///
-    /// `cell_size` should equal the expected query radius for optimal performance
-    /// (27-cell worst-case per query at that ratio).
+    /// `cell_size` should equal the expected query radius for optimal
+    /// performance (27-cell worst-case per query at that ratio).
     ///
     /// # Panics
     ///
     /// Panics if `cell_size ≤ 0`, if item count exceeds `u32::MAX`, or if the
     /// resulting grid dimensions overflow `usize` (box too large for `cell_size`).
-    pub fn build(items: impl IntoIterator<Item = (Vec3, T)>, cell_size: f32) -> Self {
+    pub fn build(items: impl IntoIterator<Item = (Vec3, T)>, cell_size: f32) -> Self
+    where
+        T: Send + Sync,
+    {
         assert!(cell_size > 0.0, "cell_size must be positive");
 
         let items: Vec<(Vec3, T)> = items.into_iter().collect();
@@ -40,33 +44,27 @@ impl<T: Copy> SpatialGrid<T> {
                 origin: Vec3::zero(),
                 dims: [0, 0, 0],
                 offsets: vec![0],
-                indices: Vec::new(),
-                items: Vec::new(),
+                items,
             };
         }
 
-        let mut min = Vec3::splat(f32::MAX);
-        let mut max = Vec3::splat(f32::MIN);
-        for &(pos, _) in &items {
-            if pos.x < min.x {
-                min.x = pos.x;
-            }
-            if pos.y < min.y {
-                min.y = pos.y;
-            }
-            if pos.z < min.z {
-                min.z = pos.z;
-            }
-            if pos.x > max.x {
-                max.x = pos.x;
-            }
-            if pos.y > max.y {
-                max.y = pos.y;
-            }
-            if pos.z > max.z {
-                max.z = pos.z;
-            }
-        }
+        let (min, max) = items.par_iter().map(|(p, _)| (*p, *p)).reduce(
+            || (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(a_min, a_max), (b_min, b_max)| {
+                (
+                    Vec3::new(
+                        a_min.x.min(b_min.x),
+                        a_min.y.min(b_min.y),
+                        a_min.z.min(b_min.z),
+                    ),
+                    Vec3::new(
+                        a_max.x.max(b_max.x),
+                        a_max.y.max(b_max.y),
+                        a_max.z.max(b_max.z),
+                    ),
+                )
+            },
+        );
 
         let eps = cell_size * 1e-4;
         let dims = [
@@ -83,36 +81,42 @@ impl<T: Copy> SpatialGrid<T> {
                 )
             });
 
-        let mut counts = vec![0u32; num_cells];
-        for &(pos, _) in &items {
-            if let Some(ci) = cell_index_of(pos, min, cell_size, dims) {
-                counts[ci] += 1;
+        let atomic_counts: Vec<AtomicU32> = (0..num_cells).map(|_| AtomicU32::new(0)).collect();
+        items.par_iter().for_each(|(pos, _)| {
+            if let Some(ci) = cell_index_of(*pos, min, cell_size, dims) {
+                atomic_counts[ci].fetch_add(1, Ordering::Relaxed);
             }
-        }
+        });
 
         let mut offsets = vec![0u32; num_cells + 1];
         for c in 0..num_cells {
-            offsets[c + 1] = offsets[c] + counts[c];
+            offsets[c + 1] = offsets[c] + atomic_counts[c].load(Ordering::Relaxed);
         }
 
-        let total_indexed = offsets[num_cells] as usize;
-        let mut indices = vec![0u32; total_indexed];
-        let mut cursor = counts;
-        cursor[..num_cells].copy_from_slice(&offsets[..num_cells]);
-        for (i, &(pos, _)) in items.iter().enumerate() {
-            if let Some(ci) = cell_index_of(pos, min, cell_size, dims) {
-                indices[cursor[ci] as usize] = i as u32;
-                cursor[ci] += 1;
-            }
+        let total = offsets[num_cells] as usize;
+        let mut sorted = Vec::<(Vec3, T)>::with_capacity(total);
+        // SAFETY: every slot in 0..total is written exactly once below via
+        // the disjoint-range cursor argument; `(Vec3, T)` is `Copy` (no drop).
+        unsafe { sorted.set_len(total) };
+        for c in 0..num_cells {
+            atomic_counts[c].store(offsets[c], Ordering::Relaxed);
         }
+        let sorted_ptr = sorted.as_mut_ptr() as usize;
+        items.par_iter().for_each(|(pos, val)| {
+            if let Some(ci) = cell_index_of(*pos, min, cell_size, dims) {
+                let slot = atomic_counts[ci].fetch_add(1, Ordering::Relaxed) as usize;
+                // SAFETY: `fetch_add` gives each thread a unique slot within
+                // `[offsets[ci], offsets[ci+1])`. All cell ranges are disjoint.
+                unsafe { (sorted_ptr as *mut (Vec3, T)).add(slot).write((*pos, *val)) };
+            }
+        });
 
         Self {
             cell_size,
             origin: min,
             dims,
             offsets,
-            indices,
-            items,
+            items: sorted,
         }
     }
 
@@ -252,9 +256,8 @@ impl<T: Copy> Iterator for QueryIter<'_, T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             while self.cell_pos < self.cell_end {
-                let idx = self.grid.indices[self.cell_pos as usize] as usize;
+                let (pos, val) = self.grid.items[self.cell_pos as usize];
                 self.cell_pos += 1;
-                let (pos, val) = self.grid.items[idx];
                 if pos.dist_sq(self.center) <= self.radius_sq {
                     return Some((pos, val));
                 }
