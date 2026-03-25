@@ -18,3 +18,10 @@ pub const COULOMB_CONST: f32 = 332.0637;
 
 /// DREIDING hydrogen bond cosine exponent.
 pub const HBOND_N: usize = 2;
+
+/// Returns the maximum non-bonded interaction cutoff radius (Å) across all
+/// active potentials.
+pub fn max_interaction_cutoff(electrostatics: Option<f32>) -> f32 {
+    let coulomb = electrostatics.map(|_| COULOMB_CUTOFF).unwrap_or(0.0);
+    VDW_CUTOFF.max(HBOND_CUTOFF).max(coulomb)
+}
