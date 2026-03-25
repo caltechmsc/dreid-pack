@@ -94,9 +94,9 @@ impl ResidueType {
         }
     }
 
-    /// Whether this residue participates in rotamer packing (`n_chi > 0`).
+    /// Whether this residue participates in rotamer packing.
     pub const fn is_packable(self) -> bool {
-        self.n_chi() > 0
+        !matches!(self, Self::Gly | Self::Ala | Self::Cyx) // TODO: To support disulfide optimization, replace this with `self.n_chi() > 0`.
     }
 
     /// Symmetry period of the polar-hydrogen torsion (radians).
