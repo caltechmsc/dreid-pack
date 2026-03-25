@@ -26,6 +26,14 @@ pub struct PackConfig {
     /// Default `false`.
     pub include_input_conformation: bool,
 
+    /// Self-energy window above the lowest-energy rotamer conformation (kcal/mol).
+    ///
+    /// Rotamer conformations whose self-energy exceeds the lowest-energy rotamer
+    /// + this threshold are discarded before pair-energy computation.
+    ///
+    /// Default `15.0` kcal/mol.
+    pub self_energy_threshold: f32,
+
     /// Minimum Dunbrack rotamer probability required to include a rotamer.
     ///
     /// Rotamers whose backbone-dependent probability falls below this threshold
@@ -42,6 +50,7 @@ impl Default for PackConfig {
             electrostatics: None,
             sample_polar_h: true,
             include_input_conformation: false,
+            self_energy_threshold: 15.0,
             rotamer_prob_cutoff: 0.0,
         }
     }
