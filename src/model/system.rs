@@ -29,6 +29,8 @@ pub struct Residue {
     phi: f32,
     /// Backbone ψ (rad).
     psi: f32,
+    /// Peptide-bond ω (rad).
+    omega: f32,
     /// Per-atom sidechain atom coordinates.
     sidechain: ArrayVec<Vec3, MAX_SIDECHAIN_ATOMS>,
     /// Per-atom DREIDING type.
@@ -66,6 +68,7 @@ impl Residue {
         anchor: [Vec3; 3],
         phi: f32,
         psi: f32,
+        omega: f32,
         atoms: SidechainAtoms<'_>,
     ) -> Option<Self> {
         if !res_type.is_packable() {
@@ -85,6 +88,7 @@ impl Residue {
             anchor,
             phi,
             psi,
+            omega,
             sidechain: atoms.coords.iter().copied().collect(),
             atom_types: atoms.types.iter().copied().collect(),
             atom_charges: atoms.charges.iter().copied().collect(),
@@ -107,6 +111,10 @@ impl Residue {
     #[inline]
     pub fn psi(&self) -> f32 {
         self.psi
+    }
+    #[inline]
+    pub fn omega(&self) -> f32 {
+        self.omega
     }
     #[inline]
     pub fn sidechain(&self) -> &[Vec3] {
@@ -315,6 +323,7 @@ mod tests {
     use super::*;
     use crate::model::residue::ResidueType;
     use crate::model::types::{TypeIdx, Vec3};
+    use std::f32::consts::PI;
 
     fn v(x: f32, y: f32, z: f32) -> Vec3 {
         Vec3::new(x, y, z)
@@ -335,6 +344,7 @@ mod tests {
             anchor,
             -1.0,
             1.0,
+            PI,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,
@@ -397,14 +407,14 @@ mod tests {
             charges: &[],
             donor_of_h: &[],
         };
-        assert!(Residue::new(ResidueType::Gly, anchor, 0.0, 0.0, empty).is_none());
+        assert!(Residue::new(ResidueType::Gly, anchor, 0.0, 0.0, PI, empty).is_none());
         let empty = SidechainAtoms {
             coords: &[],
             types: &[],
             charges: &[],
             donor_of_h: &[],
         };
-        assert!(Residue::new(ResidueType::Ala, anchor, 0.0, 0.0, empty).is_none());
+        assert!(Residue::new(ResidueType::Ala, anchor, 0.0, 0.0, PI, empty).is_none());
     }
 
     #[test]
@@ -419,6 +429,7 @@ mod tests {
         assert_eq!(r.anchor()[1], v(1.5, 0.0, 0.0));
         assert_eq!(r.phi(), -1.0);
         assert_eq!(r.psi(), 1.0);
+        assert_eq!(r.omega(), PI);
         assert_eq!(r.sidechain().len(), 5);
         assert_eq!(r.atom_types().len(), 5);
         assert_eq!(r.atom_charges().len(), 5);
@@ -636,6 +647,7 @@ mod tests {
             anchor,
             0.0,
             0.0,
+            PI,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,
@@ -658,6 +670,7 @@ mod tests {
             anchor,
             0.0,
             0.0,
+            PI,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,
@@ -680,6 +693,7 @@ mod tests {
             anchor,
             0.0,
             0.0,
+            PI,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,
@@ -702,6 +716,7 @@ mod tests {
             anchor,
             0.0,
             0.0,
+            PI,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,
