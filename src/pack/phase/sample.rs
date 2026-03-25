@@ -392,3 +392,197 @@ fn sample_one(
 
     Conformations::new(data, n_candidates, n_atoms)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{system::SidechainAtoms, types::TypeIdx};
+
+    const ANCHOR: [Vec3; 3] = [
+        Vec3::new(1.458, 0.0, 0.0),
+        Vec3::zero(),
+        Vec3::new(-0.524, 0.0, 1.454),
+    ];
+    const HELIX_PHI: f32 = -1.047;
+    const HELIX_PSI: f32 = -0.698;
+
+    fn make_slot(rt: ResidueType) -> Residue {
+        make_slot_omega(rt, std::f32::consts::PI)
+    }
+
+    fn make_slot_omega(rt: ResidueType, omega: f32) -> Residue {
+        let n = rt.n_atoms() as usize;
+        let coords = vec![Vec3::splat(1.0); n];
+        let types = vec![TypeIdx(0); n];
+        let charges = vec![0.0f32; n];
+        let donor_of_h = vec![u8::MAX; n];
+        Residue::new(
+            rt,
+            ANCHOR,
+            HELIX_PHI,
+            HELIX_PSI,
+            omega,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sample_empty_slots() {
+        let out = sample(&[], 0.0, false, false);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn val_produces_3_candidates() {
+        let slot = make_slot(ResidueType::Val);
+        let c = sample_one(&slot, 0.0, false, false);
+        assert_eq!(c.n_candidates(), 3);
+        assert_eq!(c.n_atoms(), ResidueType::Val.n_atoms() as usize);
+    }
+
+    #[test]
+    fn cutoff_filters_low_prob_rotamers() {
+        let slot = make_slot(ResidueType::Val);
+        let c = sample_one(&slot, 0.1, false, false);
+        assert!(c.n_candidates() >= 1 && c.n_candidates() <= 3);
+    }
+
+    #[test]
+    fn cutoff_min_one_guarantee() {
+        let slot = make_slot(ResidueType::Val);
+        let c = sample_one(&slot, 1.0, false, false);
+        assert_eq!(c.n_candidates(), 1);
+    }
+
+    #[test]
+    fn ser_polar_h_expansion() {
+        let slot = make_slot(ResidueType::Ser);
+        let c = sample_one(&slot, 0.0, true, false);
+        assert_eq!(c.n_candidates(), 3 * 6);
+    }
+
+    #[test]
+    fn ser_no_polar_h_when_disabled() {
+        let slot = make_slot(ResidueType::Ser);
+        let c = sample_one(&slot, 0.0, false, false);
+        assert_eq!(c.n_candidates(), 3);
+    }
+
+    #[test]
+    fn tyr_polar_h_uses_half_period() {
+        let slot = make_slot(ResidueType::Tyr);
+        let c = sample_one(&slot, 0.0, true, false);
+        assert_eq!(c.n_candidates(), 18 * 3);
+    }
+
+    #[test]
+    fn lys_polar_h_uses_third_period() {
+        let slot = make_slot(ResidueType::Lys);
+        let c = sample_one(&slot, 0.0, true, false);
+        assert_eq!(c.n_candidates(), 73 * 2);
+    }
+
+    #[test]
+    fn include_input_adds_one_candidate() {
+        let slot = make_slot(ResidueType::Val);
+        let without = sample_one(&slot, 0.0, false, false);
+        let with = sample_one(&slot, 0.0, false, true);
+        assert_eq!(with.n_candidates(), without.n_candidates() + 1);
+    }
+
+    #[test]
+    fn include_input_preserves_original_coords() {
+        let slot = make_slot(ResidueType::Val);
+        let c = sample_one(&slot, 0.0, false, true);
+        let last = c.coords_of(c.n_candidates() - 1);
+        assert_eq!(last, slot.sidechain());
+    }
+
+    #[test]
+    fn pro_trans_builds_without_panic() {
+        let slot = make_slot(ResidueType::Pro);
+        let c = sample_one(&slot, 0.0, false, false);
+        assert_eq!(c.n_candidates(), 2);
+        assert_eq!(c.n_atoms(), ResidueType::Pro.n_atoms() as usize);
+    }
+
+    #[test]
+    fn pro_cis_builds_without_panic() {
+        let slot = make_slot_omega(ResidueType::Pro, 0.0);
+        let c = sample_one(&slot, 0.0, false, false);
+        assert_eq!(c.n_candidates(), 2);
+        assert_eq!(c.n_atoms(), ResidueType::Pro.n_atoms() as usize);
+    }
+
+    #[test]
+    fn all_coordinates_are_finite() {
+        let slot = make_slot(ResidueType::Arg);
+        let c = sample_one(&slot, 0.0, false, false);
+        for i in 0..c.n_candidates() {
+            for v in c.coords_of(i) {
+                assert!(
+                    v.x.is_finite() && v.y.is_finite() && v.z.is_finite(),
+                    "non-finite coordinate in candidate {i}: {v:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_sample_matches_sequential() {
+        let slots = [
+            make_slot(ResidueType::Val),
+            make_slot(ResidueType::Ser),
+            make_slot(ResidueType::Pro),
+        ];
+        let par = sample(&slots, 0.0, true, false);
+        let seq: Vec<_> = slots
+            .iter()
+            .map(|s| sample_one(s, 0.0, true, false))
+            .collect();
+        assert_eq!(par.len(), seq.len());
+        for (p, s) in par.iter().zip(seq.iter()) {
+            assert_eq!(p.n_candidates(), s.n_candidates());
+            assert_eq!(p.n_atoms(), s.n_atoms());
+        }
+    }
+
+    #[test]
+    fn polar_h_angles_full_period() {
+        let ph = polar_h_angles(ResidueType::Ser, true);
+        assert_eq!(ph.len(), 6);
+        assert_eq!(ph[0], 0.0);
+    }
+
+    #[test]
+    fn polar_h_angles_half_period() {
+        let ph = polar_h_angles(ResidueType::Tyr, true);
+        assert_eq!(ph.len(), 3);
+    }
+
+    #[test]
+    fn polar_h_angles_third_period() {
+        let ph = polar_h_angles(ResidueType::Lys, true);
+        assert_eq!(ph.len(), 2);
+    }
+
+    #[test]
+    fn polar_h_angles_disabled() {
+        let ph = polar_h_angles(ResidueType::Ser, false);
+        assert_eq!(ph.len(), 1);
+        assert_eq!(ph[0], 0.0);
+    }
+
+    #[test]
+    fn polar_h_angles_no_polar_h_type() {
+        let ph = polar_h_angles(ResidueType::Val, true);
+        assert_eq!(ph.len(), 1);
+        assert_eq!(ph[0], 0.0);
+    }
+}
