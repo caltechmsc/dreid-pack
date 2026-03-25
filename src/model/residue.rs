@@ -99,6 +99,19 @@ impl ResidueType {
         self.n_chi() > 0
     }
 
+    /// Symmetry period of the polar-hydrogen torsion (radians).
+    ///
+    /// Returns `0.0` for types with no rotatable polar hydrogen.
+    pub const fn polar_h_period(self) -> f32 {
+        use core::f32::consts::{PI, TAU};
+        match self {
+            Self::Lys => TAU / 3.0,
+            Self::Tyr => PI,
+            Self::Ser | Self::Thr | Self::Cys | Self::Ash | Self::Glh | Self::Lyn => TAU,
+            _ => 0.0,
+        }
+    }
+
     /// Conservative upper bound on sidechain radius (Å, from Cα).
     pub const fn reach(self) -> f32 {
         match self {
