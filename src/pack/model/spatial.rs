@@ -94,22 +94,32 @@ impl<T: Copy> SpatialGrid<T> {
         }
 
         let total = offsets[num_cells] as usize;
-        let mut sorted = Vec::<(Vec3, T)>::with_capacity(total);
-        // SAFETY: every slot in 0..total is written exactly once below via
-        // the disjoint-range cursor argument; `(Vec3, T)` is `Copy` (no drop).
-        unsafe { sorted.set_len(total) };
+        let mut sorted_uninit = Vec::<std::mem::MaybeUninit<(Vec3, T)>>::with_capacity(total);
+        // SAFETY: MaybeUninit<_> carries no validity invariant; filling with
+        // uninitialized bytes is always sound.
+        unsafe { sorted_uninit.set_len(total) };
         for c in 0..num_cells {
             atomic_counts[c].store(offsets[c], Ordering::Relaxed);
         }
-        let sorted_ptr = sorted.as_mut_ptr() as usize;
+        let sorted_ptr = sorted_uninit.as_mut_ptr() as usize;
         items.par_iter().for_each(|(pos, val)| {
             if let Some(ci) = cell_index_of(*pos, min, cell_size, dims) {
                 let slot = atomic_counts[ci].fetch_add(1, Ordering::Relaxed) as usize;
                 // SAFETY: `fetch_add` gives each thread a unique slot within
-                // `[offsets[ci], offsets[ci+1])`. All cell ranges are disjoint.
+                // `[offsets[ci], offsets[ci+1])`. All cell ranges are disjoint,
+                // so no two threads write the same index.
                 unsafe { (sorted_ptr as *mut (Vec3, T)).add(slot).write((*pos, *val)) };
             }
         });
+        // SAFETY: every element has been initialised by the parallel loop above.
+        let sorted = unsafe {
+            std::vec::Vec::from_raw_parts(
+                sorted_uninit.as_mut_ptr() as *mut (Vec3, T),
+                total,
+                total,
+            )
+        };
+        std::mem::forget(sorted_uninit);
 
         Self {
             cell_size,
