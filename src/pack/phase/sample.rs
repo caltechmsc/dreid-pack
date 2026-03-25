@@ -390,6 +390,8 @@ fn sample_one(
         n_candidates += 1;
     }
 
+    data.shrink_to_fit();
+
     Conformations::new(data, n_candidates, n_atoms)
 }
 
