@@ -56,3 +56,88 @@ pub fn build(slots: &[Residue], vdw_cutoff: f32) -> ContactGraph {
 
     ContactGraph::build(n, edges)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{residue::ResidueType, system::SidechainAtoms, types::TypeIdx};
+
+    fn make_slot(ca: Vec3, res_type: ResidueType) -> Residue {
+        let n = res_type.n_atoms() as usize;
+        let coords = vec![Vec3::zero(); n];
+        let types = vec![TypeIdx(0); n];
+        let charges = vec![0.0f32; n];
+        let donor_of_h = vec![u8::MAX; n];
+        Residue::new(
+            res_type,
+            [Vec3::zero(), ca, Vec3::zero()],
+            0.0,
+            0.0,
+            SidechainAtoms {
+                coords: &coords,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donor_of_h,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn build_empty_slots_returns_no_edges() {
+        let g = build(&[], 4.0);
+        assert_eq!(g.n_slots(), 0);
+        assert_eq!(g.n_edges(), 0);
+    }
+
+    #[test]
+    fn build_single_slot_returns_no_edges() {
+        let slots = [make_slot(Vec3::zero(), ResidueType::Ser)];
+        let g = build(&slots, 4.0);
+        assert_eq!(g.n_slots(), 1);
+        assert_eq!(g.n_edges(), 0);
+    }
+
+    #[test]
+    fn close_pair_within_threshold_yields_one_edge() {
+        let slots = [
+            make_slot(Vec3::new(0.0, 0.0, 0.0), ResidueType::Ser),
+            make_slot(Vec3::new(5.0, 0.0, 0.0), ResidueType::Ser),
+        ];
+        let g = build(&slots, 4.0);
+        assert_eq!(g.n_edges(), 1);
+        assert_eq!(g.edges(), &[(0, 1)]);
+    }
+
+    #[test]
+    fn pair_beyond_threshold_yields_no_edge() {
+        let slots = [
+            make_slot(Vec3::new(0.0, 0.0, 0.0), ResidueType::Ser),
+            make_slot(Vec3::new(15.0, 0.0, 0.0), ResidueType::Ser),
+        ];
+        let g = build(&slots, 4.0);
+        assert_eq!(g.n_edges(), 0);
+    }
+
+    #[test]
+    fn mixed_reaches_within_threshold_yield_one_edge() {
+        let slots = [
+            make_slot(Vec3::new(0.0, 0.0, 0.0), ResidueType::Ser),
+            make_slot(Vec3::new(14.0, 0.0, 0.0), ResidueType::Trp),
+        ];
+        let g = build(&slots, 4.0);
+        assert_eq!(g.n_edges(), 1);
+    }
+
+    #[test]
+    fn chain_connectivity_skips_distant_pair() {
+        let slots = [
+            make_slot(Vec3::new(0.0, 0.0, 0.0), ResidueType::Ser),
+            make_slot(Vec3::new(11.0, 0.0, 0.0), ResidueType::Ser),
+            make_slot(Vec3::new(22.0, 0.0, 0.0), ResidueType::Ser),
+        ];
+        let g = build(&slots, 4.0);
+        assert_eq!(g.n_edges(), 2);
+        assert_eq!(g.edges(), &[(0, 1), (1, 2)]);
+    }
+}
