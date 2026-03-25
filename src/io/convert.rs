@@ -250,9 +250,10 @@ fn build(forged: ForgedSystem, scope: &PackingScope) -> Result<Session, Error> {
     let n_atoms = forged.system.atoms.len();
     let atom_to_ref = build_atom_to_ref(n_atoms, &mobile_metas);
     let (ff, h_types) = build_ff(forged.atom_types.len(), &forged.potentials)?;
-    let phi_psi = compute_phi_psi(&forged.system.atoms, bio, &mobile_metas, &groups);
+    let phi_psi_omega = compute_phi_psi_omega(&forged.system.atoms, bio, &mobile_metas, &groups);
     let (fixed_pool, fixed_meta) = build_fixed_pool(&forged, bio, &atom_to_ref, &h_types);
-    let (mobile, mobile_meta) = build_mobile(&forged, &groups, &mobile_metas, &phi_psi, &h_types);
+    let (mobile, mobile_meta) =
+        build_mobile(&forged, &groups, &mobile_metas, &phi_psi_omega, &h_types);
     let bonds = build_bonds(&forged.system.bonds, &atom_to_ref);
 
     let system = System {
@@ -746,12 +747,12 @@ fn build_vdw_matrix(n: usize, vdw_pairs: &[VdwPairPotential]) -> Result<VdwMatri
     }
 }
 
-fn compute_phi_psi(
+fn compute_phi_psi_omega(
     atoms: &[dreid_forge::Atom],
     bio: &BioMetadata,
     mobile_metas: &[MobileMetadata],
     groups: &[ResidueGroup],
-) -> Vec<(f32, f32)> {
+) -> Vec<(f32, f32, f32)> {
     let mut chain_groups: HashMap<&str, Vec<usize>> = HashMap::new();
     for (gi, g) in groups.iter().enumerate() {
         chain_groups
@@ -806,7 +807,25 @@ fn compute_phi_psi(
                 0.0
             };
 
-            (phi, psi)
+            let omega = if pos > 0 {
+                let prev_g = &groups[chain_idx[pos - 1]];
+                find_backbone_atom(prev_g, bio, "CA")
+                    .and_then(|prev_ca| {
+                        find_backbone_atom(prev_g, bio, "C").map(|prev_c| {
+                            dihedral(
+                                atoms[prev_ca].position,
+                                atoms[prev_c].position,
+                                atoms[m.n_idx].position,
+                                atoms[m.ca_idx].position,
+                            )
+                        })
+                    })
+                    .unwrap_or(std::f32::consts::PI)
+            } else {
+                std::f32::consts::PI
+            };
+
+            (phi, psi, omega)
         })
         .collect()
 }
@@ -876,7 +895,7 @@ fn build_mobile(
     forged: &ForgedSystem,
     groups: &[ResidueGroup],
     mobile_metas: &[MobileMetadata],
-    phi_psi: &[(f32, f32)],
+    phi_psi_omega: &[(f32, f32, f32)],
     h_types: &HashSet<TypeIdx>,
 ) -> (Vec<Residue>, Vec<MobileSidechain>) {
     let mut df_to_local: HashMap<usize, (usize, u8)> = HashMap::new();
@@ -913,7 +932,7 @@ fn build_mobile(
 
     for (r, m) in mobile_metas.iter().enumerate() {
         let g = &groups[m.group_idx];
-        let (phi, psi) = phi_psi[r];
+        let (phi, psi, omega) = phi_psi_omega[r];
         let anchor = [
             to_vec3(forged.system.atoms[m.n_idx].position),
             to_vec3(forged.system.atoms[m.ca_idx].position),
@@ -936,6 +955,7 @@ fn build_mobile(
             anchor,
             phi,
             psi,
+            omega,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,

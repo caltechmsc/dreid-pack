@@ -73,6 +73,7 @@ mod tests {
             [Vec3::zero(), ca, Vec3::zero()],
             0.0,
             0.0,
+            std::f32::consts::PI,
             SidechainAtoms {
                 coords: &coords,
                 types: &types,
