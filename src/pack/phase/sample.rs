@@ -144,14 +144,6 @@ fn sample_one(
             dunbrack::Cyh,
             rotamer::Cym
         ),
-        T::Cyx => expand!(
-            slot,
-            prob_cutoff,
-            data,
-            n_candidates,
-            dunbrack::Cyd,
-            rotamer::Cyx
-        ),
         T::Cys => {
             expand!(
                 slot,
@@ -381,7 +373,7 @@ fn sample_one(
                 ph
             )
         }
-        T::Gly | T::Ala => unreachable!(),
+        T::Gly | T::Ala | T::Cyx => unreachable!(),
     }
 
     if include_input {
