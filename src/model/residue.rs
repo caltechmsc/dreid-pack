@@ -155,4 +155,20 @@ mod tests {
         assert!(!ResidueType::Ala.is_packable());
         assert!(ResidueType::Ser.is_packable());
     }
+
+    #[test]
+    fn polar_h_period_values() {
+        use std::f32::consts::{PI, TAU};
+
+        assert_eq!(ResidueType::Ser.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Thr.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Cys.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Ash.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Glh.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Lyn.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Tyr.polar_h_period(), PI);
+        assert_eq!(ResidueType::Lys.polar_h_period(), TAU / 3.0);
+        assert_eq!(ResidueType::Val.polar_h_period(), 0.0);
+        assert_eq!(ResidueType::Gly.polar_h_period(), 0.0);
+    }
 }
