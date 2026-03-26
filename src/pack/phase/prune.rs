@@ -1,5 +1,6 @@
 use crate::pack::constant::{
-    COULOMB_CONST, COULOMB_CUTOFF, HBOND_CUTOFF_SQ, HBOND_N, VDW_CUTOFF, VDW_CUTOFF_SQ,
+    COULOMB_CONST, COULOMB_CUTOFF, COULOMB_CUTOFF_SQ, HBOND_CUTOFF, HBOND_CUTOFF_SQ, HBOND_N,
+    VDW_CUTOFF, VDW_CUTOFF_SQ,
 };
 use crate::{
     model::{
@@ -105,12 +106,14 @@ fn candidate_energy_no_coul(
     for a in 0..atoms.n_a {
         let pos_a = coords[a];
         let type_a = atoms.types[a];
-        for (_, b_idx) in fixed.neighbors(pos_a, VDW_CUTOFF) {
+        for (_, b_idx) in fixed.neighbors(pos_a, VDW_CUTOFF.max(HBOND_CUTOFF)) {
             let b = b_idx as usize;
             let pos_b = fixed.positions[b];
             let type_b = fixed.types[b];
             let r_sq = pos_a.dist_sq(pos_b);
-            energy += vdw_pair(&ff.vdw, type_a, type_b, r_sq);
+            if r_sq <= VDW_CUTOFF_SQ {
+                energy += vdw_pair(&ff.vdw, type_a, type_b, r_sq);
+            }
             if atoms.donors[a] != u8::MAX {
                 energy += hbond_sc_donor(
                     coords,
@@ -142,7 +145,7 @@ fn candidate_energy_coul(
     for a in 0..atoms.n_a {
         let pos_a = coords[a];
         let type_a = atoms.types[a];
-        for (_, b_idx) in fixed.neighbors(pos_a, COULOMB_CUTOFF) {
+        for (_, b_idx) in fixed.neighbors(pos_a, COULOMB_CUTOFF.max(VDW_CUTOFF).max(HBOND_CUTOFF)) {
             let b = b_idx as usize;
             let pos_b = fixed.positions[b];
             let type_b = fixed.types[b];
@@ -164,7 +167,9 @@ fn candidate_energy_coul(
             if fixed.donor_for_h[b] != NO_DONOR {
                 energy += hbond_fixed_donor(fixed, b, pos_a, type_a, &ff.hbond);
             }
-            energy += c_d * atoms.charges[a] * fixed.charges[b] / r_sq;
+            if r_sq <= COULOMB_CUTOFF_SQ {
+                energy += c_d * atoms.charges[a] * fixed.charges[b] / r_sq;
+            }
         }
     }
     energy
