@@ -237,3 +237,240 @@ fn cos_dha(d: Vec3, h: Vec3, a: Vec3) -> f32 {
     }
     dh.dot(ha) / denom_sq.sqrt()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        residue::ResidueType,
+        system::{FixedAtomPool, ForceFieldParams, HBondParams, LjMatrix, LjPair, SidechainAtoms},
+        types::TypeIdx,
+    };
+    use crate::pack::constant::max_interaction_cutoff;
+    use std::collections::{HashMap, HashSet};
+
+    fn v(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    fn t(n: u8) -> TypeIdx {
+        TypeIdx(n)
+    }
+
+    fn lj_uniform(n: usize, d0: f32, r0_sq: f32) -> LjMatrix {
+        let pair = LjPair { d0, r0_sq };
+        LjMatrix::new(n, vec![pair; n * n])
+    }
+
+    fn empty_hbond() -> HBondParams {
+        HBondParams::new(HashSet::new(), HashSet::new(), HashMap::new())
+    }
+
+    fn ff_lj(n: usize, d0: f32, r0_sq: f32) -> ForceFieldParams {
+        ForceFieldParams {
+            vdw: VdwMatrix::LennardJones(lj_uniform(n, d0, r0_sq)),
+            hbond: empty_hbond(),
+        }
+    }
+
+    fn make_slot(rt: ResidueType, sidechain: &[Vec3]) -> Residue {
+        let n = sidechain.len();
+        let anchor = [v(1.458, 0.0, 0.0), v(0.0, 0.0, 0.0), v(-0.524, 0.0, 1.454)];
+        let types = vec![t(0); n];
+        let charges = vec![0.0_f32; n];
+        let donors = vec![u8::MAX; n];
+        Residue::new(
+            rt,
+            anchor,
+            -1.0,
+            1.0,
+            std::f32::consts::PI,
+            SidechainAtoms {
+                coords: sidechain,
+                types: &types,
+                charges: &charges,
+                donor_of_h: &donors,
+            },
+        )
+        .unwrap()
+    }
+
+    fn make_pool(positions: Vec<Vec3>) -> FixedAtomPool {
+        let n = positions.len();
+        FixedAtomPool {
+            positions,
+            types: vec![t(0); n],
+            charges: vec![0.0; n],
+            donor_for_h: vec![NO_DONOR; n],
+        }
+    }
+
+    fn make_conformations(coords: Vec<Vec3>, n_candidates: u16, n_atoms: u8) -> Conformations {
+        Conformations::new(coords, n_candidates, n_atoms)
+    }
+
+    #[test]
+    fn prune_empty_slots() {
+        let pool = make_pool(vec![]);
+        let fixed = FixedAtoms::build(&pool, max_interaction_cutoff(None));
+        let ff = ff_lj(1, 0.0, 1.0);
+        let table = prune(&[], &mut [], &fixed, &ff, None, f32::INFINITY);
+        assert_eq!(table.n_slots(), 0);
+    }
+
+    #[test]
+    fn prune_no_fixed_atoms_all_zero() {
+        let pool = make_pool(vec![]);
+        let fixed = FixedAtoms::build(&pool, max_interaction_cutoff(None));
+        let ff = ff_lj(1, 0.1, 4.0);
+
+        let sc = [v(2.0, 0.0, 0.0); 5];
+        let slot = make_slot(ResidueType::Ser, &sc);
+
+        let mut confs = vec![make_conformations(vec![v(2.0, 0.0, 0.0); 15], 3, 5)];
+        let table = prune(&[slot], &mut confs, &fixed, &ff, None, f32::INFINITY);
+        assert_eq!(table.n_slots(), 1);
+        assert_eq!(table.n_candidates(0), 3);
+        for r in 0..3 {
+            assert_eq!(table.get(0, r), 0.0);
+        }
+    }
+
+    #[test]
+    fn prune_threshold_removes_high_energy() {
+        let pool = make_pool(vec![v(1.0, 0.0, 0.0)]);
+        let fixed = FixedAtoms::build(&pool, max_interaction_cutoff(None));
+        let ff = ff_lj(1, 0.1, 9.0);
+
+        let sc = [v(0.0, 0.0, 0.0); 5];
+        let slot = make_slot(ResidueType::Ser, &sc);
+
+        let mut data = Vec::new();
+        for _ in 0..5 {
+            data.push(v(0.5, 0.0, 0.0));
+        }
+        for _ in 0..5 {
+            data.push(v(20.0, 0.0, 0.0));
+        }
+        for _ in 0..5 {
+            data.push(v(20.0, 10.0, 0.0));
+        }
+
+        let mut confs = vec![make_conformations(data, 3, 5)];
+        let table = prune(&[slot], &mut confs, &fixed, &ff, None, 0.01);
+
+        assert_eq!(table.n_candidates(0), 2);
+        assert_eq!(confs[0].n_candidates(), 2);
+    }
+
+    #[test]
+    fn prune_guarantees_at_least_one_survivor() {
+        let pool = make_pool(vec![v(0.0, 0.0, 0.0)]);
+        let fixed = FixedAtoms::build(&pool, max_interaction_cutoff(None));
+        let ff = ff_lj(1, 10.0, 9.0);
+
+        let sc = [v(1.5, 0.0, 0.0); 5];
+        let slot = make_slot(ResidueType::Ser, &sc);
+
+        let data: Vec<Vec3> = (0..10)
+            .map(|i| v(1.5 + 0.01 * i as f32, 0.0, 0.0))
+            .collect();
+        let mut confs = vec![make_conformations(data, 2, 5)];
+        let table = prune(&[slot], &mut confs, &fixed, &ff, None, 0.0);
+
+        assert!(table.n_candidates(0) >= 1);
+        assert!(confs[0].n_candidates() >= 1);
+    }
+
+    #[test]
+    fn prune_conformations_stay_in_sync() {
+        let pool = make_pool(vec![v(1.0, 0.0, 0.0)]);
+        let fixed = FixedAtoms::build(&pool, max_interaction_cutoff(None));
+        let ff = ff_lj(1, 0.1, 9.0);
+
+        let sc = [v(0.0, 0.0, 0.0); 5];
+        let slot = make_slot(ResidueType::Ser, &sc);
+
+        let mut data = Vec::new();
+        data.extend(std::iter::repeat(v(0.5, 0.0, 0.0)).take(5));
+        data.extend(std::iter::repeat(v(50.0, 0.0, 0.0)).take(5));
+        data.extend(std::iter::repeat(v(0.3, 0.0, 0.0)).take(5));
+        data.extend(std::iter::repeat(v(50.0, 5.0, 0.0)).take(5));
+
+        let mut confs = vec![make_conformations(data, 4, 5)];
+        let table = prune(&[slot], &mut confs, &fixed, &ff, None, 0.01);
+
+        assert_eq!(table.n_candidates(0), confs[0].n_candidates());
+    }
+
+    #[test]
+    fn prune_coulomb_adds_energy() {
+        let mut pool = make_pool(vec![v(3.0, 0.0, 0.0)]);
+        pool.charges[0] = 1.0;
+        let fixed = FixedAtoms::build(&pool, max_interaction_cutoff(Some(1.0)));
+        let ff = ff_lj(1, 0.0, 1.0);
+
+        let sc = [v(0.0, 0.0, 0.0); 5];
+        let slot = {
+            let n = sc.len();
+            let anchor = [v(1.458, 0.0, 0.0), v(0.0, 0.0, 0.0), v(-0.524, 0.0, 1.454)];
+            let types = vec![t(0); n];
+            let mut charges = vec![0.0_f32; n];
+            charges[0] = 0.5;
+            let donors = vec![u8::MAX; n];
+            Residue::new(
+                ResidueType::Ser,
+                anchor,
+                -1.0,
+                1.0,
+                std::f32::consts::PI,
+                SidechainAtoms {
+                    coords: &sc,
+                    types: &types,
+                    charges: &charges,
+                    donor_of_h: &donors,
+                },
+            )
+            .unwrap()
+        };
+
+        let data = vec![
+            v(4.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+        ];
+        let mut confs = vec![make_conformations(data, 2, 5)];
+
+        let data_no = vec![
+            v(4.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+            v(50.0, 0.0, 0.0),
+        ];
+        let mut confs_no = vec![make_conformations(data_no, 2, 5)];
+        let table_no = prune(
+            &[slot.clone()],
+            &mut confs_no,
+            &fixed,
+            &ff,
+            None,
+            f32::INFINITY,
+        );
+        let table_yes = prune(&[slot], &mut confs, &fixed, &ff, Some(1.0), f32::INFINITY);
+
+        assert_ne!(table_yes.get(0, 0), table_no.get(0, 0));
+    }
+}
