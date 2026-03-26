@@ -28,6 +28,9 @@ const _: () = assert!(
 /// Returns the maximum non-bonded interaction cutoff radius (Å) across all
 /// active potentials.
 pub fn max_interaction_cutoff(electrostatics: Option<f32>) -> f32 {
-    let coulomb = electrostatics.map(|_| COULOMB_CUTOFF).unwrap_or(0.0);
-    VDW_CUTOFF.max(HBOND_CUTOFF).max(coulomb)
+    let main = match electrostatics {
+        None => VDW_CUTOFF,
+        Some(_) => COULOMB_CUTOFF,
+    };
+    main.max(HBOND_CUTOFF)
 }
