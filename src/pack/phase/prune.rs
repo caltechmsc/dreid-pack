@@ -1,6 +1,5 @@
 use crate::pack::constant::{
-    COULOMB_CONST, COULOMB_CUTOFF, COULOMB_CUTOFF_SQ, HBOND_CUTOFF_SQ, HBOND_N, VDW_CUTOFF,
-    VDW_CUTOFF_SQ,
+    COULOMB_CONST, COULOMB_CUTOFF, HBOND_CUTOFF_SQ, HBOND_N, VDW_CUTOFF, VDW_CUTOFF_SQ,
 };
 use crate::{
     model::{
@@ -114,9 +113,7 @@ fn candidate_energy_no_coul(
             let pos_b = fixed.positions[b];
             let type_b = fixed.types[b];
             let r_sq = pos_a.dist_sq(pos_b);
-            if r_sq <= VDW_CUTOFF_SQ {
-                energy += vdw_pair(&ff.vdw, type_a, type_b, r_sq);
-            }
+            energy += vdw_pair(&ff.vdw, type_a, type_b, r_sq);
             if donors[a] != u8::MAX {
                 energy += hbond_sc_donor(coords, types, donors[a], a, pos_b, type_b, &ff.hbond);
             }
@@ -157,9 +154,7 @@ fn candidate_energy_coul(
             if fixed.donor_for_h[b] != NO_DONOR {
                 energy += hbond_fixed_donor(fixed, b, pos_a, type_a, &ff.hbond);
             }
-            if r_sq <= COULOMB_CUTOFF_SQ {
-                energy += c_d * charges[a] * fixed.charges[b] / r_sq;
-            }
+            energy += c_d * charges[a] * fixed.charges[b] / r_sq;
         }
     }
     energy
