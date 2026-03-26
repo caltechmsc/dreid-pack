@@ -61,6 +61,6 @@ pub fn hbond_energy(
 }
 
 /// Returns the Coulomb energy under distance-dependent dielectric ε(r) = D·r.
-pub fn coulomb_energy(c_d: f32, qi: f32, qj: f32, r_sq: f32) -> f32 {
-    c_d * qi * qj / r_sq
+pub fn coulomb_energy<const COUL: bool>(c_d: f32, qi: f32, qj: f32, r_sq: f32) -> f32 {
+    if COUL { c_d * qi * qj / r_sq } else { 0.0 }
 }
