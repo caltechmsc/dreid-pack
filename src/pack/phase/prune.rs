@@ -4,7 +4,7 @@ use crate::pack::constant::{
 };
 use crate::{
     model::{
-        system::{ForceFieldParams, Residue, VdwMatrix},
+        system::{ForceFieldParams, HBondParams, Residue, VdwMatrix},
         types::{TypeIdx, Vec3},
     },
     pack::model::{
@@ -197,7 +197,7 @@ fn hbond_sc_donor(
     h_local: usize,
     acc_pos: Vec3,
     acc_type: TypeIdx,
-    hbond: &crate::model::system::HBondParams,
+    hbond: &HBondParams,
 ) -> f32 {
     let d = d_local as usize;
     let d_pos = coords[d];
@@ -220,7 +220,7 @@ fn hbond_fixed_donor(
     b: usize,
     acc_pos: Vec3,
     acc_type: TypeIdx,
-    hbond: &crate::model::system::HBondParams,
+    hbond: &HBondParams,
 ) -> f32 {
     let d_idx = fixed.donor_for_h[b] as usize;
     let d_pos = fixed.positions[d_idx];
