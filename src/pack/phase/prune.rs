@@ -60,6 +60,14 @@ pub fn prune(
     table
 }
 
+/// Per-slot atom properties shared across all candidates of the same residue.
+struct SlotAtoms<'a> {
+    n_a: usize,
+    types: &'a [TypeIdx],
+    charges: &'a [f32],
+    donors: &'a [u8],
+}
+
 /// Computes self-energies for every candidate in a single slot.
 fn slot_self_energies(
     slot: &Residue,
@@ -69,28 +77,19 @@ fn slot_self_energies(
     coulomb_scale: Option<f32>,
 ) -> Vec<f32> {
     let n_r = confs.n_candidates();
-    let n_a = confs.n_atoms();
-    let types = slot.atom_types();
-    let charges = slot.atom_charges();
-    let donors = slot.donor_of_h();
+    let atoms = SlotAtoms {
+        n_a: confs.n_atoms(),
+        types: slot.atom_types(),
+        charges: slot.atom_charges(),
+        donors: slot.donor_of_h(),
+    };
 
     match coulomb_scale {
         None => (0..n_r)
-            .map(|r| candidate_energy_no_coul(confs.coords_of(r), n_a, types, donors, fixed, ff))
+            .map(|r| candidate_energy_no_coul(confs.coords_of(r), &atoms, fixed, ff))
             .collect(),
         Some(c_d) => (0..n_r)
-            .map(|r| {
-                candidate_energy_coul(
-                    confs.coords_of(r),
-                    n_a,
-                    types,
-                    charges,
-                    donors,
-                    fixed,
-                    ff,
-                    c_d,
-                )
-            })
+            .map(|r| candidate_energy_coul(confs.coords_of(r), &atoms, fixed, ff, c_d))
             .collect(),
     }
 }
@@ -98,24 +97,30 @@ fn slot_self_energies(
 /// Computes the non-bonded interaction energy of a candidate with all fixed atoms, excluding Coulomb interactions.
 fn candidate_energy_no_coul(
     coords: &[Vec3],
-    n_a: usize,
-    types: &[TypeIdx],
-    donors: &[u8],
+    atoms: &SlotAtoms<'_>,
     fixed: &FixedAtoms<'_>,
     ff: &ForceFieldParams,
 ) -> f32 {
     let mut energy = 0.0_f32;
-    for a in 0..n_a {
+    for a in 0..atoms.n_a {
         let pos_a = coords[a];
-        let type_a = types[a];
+        let type_a = atoms.types[a];
         for (_, b_idx) in fixed.neighbors(pos_a, VDW_CUTOFF) {
             let b = b_idx as usize;
             let pos_b = fixed.positions[b];
             let type_b = fixed.types[b];
             let r_sq = pos_a.dist_sq(pos_b);
             energy += vdw_pair(&ff.vdw, type_a, type_b, r_sq);
-            if donors[a] != u8::MAX {
-                energy += hbond_sc_donor(coords, types, donors[a], a, pos_b, type_b, &ff.hbond);
+            if atoms.donors[a] != u8::MAX {
+                energy += hbond_sc_donor(
+                    coords,
+                    atoms.types,
+                    atoms.donors[a],
+                    a,
+                    pos_b,
+                    type_b,
+                    &ff.hbond,
+                );
             }
             if fixed.donor_for_h[b] != NO_DONOR {
                 energy += hbond_fixed_donor(fixed, b, pos_a, type_a, &ff.hbond);
@@ -128,18 +133,15 @@ fn candidate_energy_no_coul(
 /// Computes the non-bonded interaction energy of a candidate with all fixed atoms, including Coulomb interactions.
 fn candidate_energy_coul(
     coords: &[Vec3],
-    n_a: usize,
-    types: &[TypeIdx],
-    charges: &[f32],
-    donors: &[u8],
+    atoms: &SlotAtoms<'_>,
     fixed: &FixedAtoms<'_>,
     ff: &ForceFieldParams,
     c_d: f32,
 ) -> f32 {
     let mut energy = 0.0_f32;
-    for a in 0..n_a {
+    for a in 0..atoms.n_a {
         let pos_a = coords[a];
-        let type_a = types[a];
+        let type_a = atoms.types[a];
         for (_, b_idx) in fixed.neighbors(pos_a, COULOMB_CUTOFF) {
             let b = b_idx as usize;
             let pos_b = fixed.positions[b];
@@ -148,13 +150,21 @@ fn candidate_energy_coul(
             if r_sq <= VDW_CUTOFF_SQ {
                 energy += vdw_pair(&ff.vdw, type_a, type_b, r_sq);
             }
-            if donors[a] != u8::MAX {
-                energy += hbond_sc_donor(coords, types, donors[a], a, pos_b, type_b, &ff.hbond);
+            if atoms.donors[a] != u8::MAX {
+                energy += hbond_sc_donor(
+                    coords,
+                    atoms.types,
+                    atoms.donors[a],
+                    a,
+                    pos_b,
+                    type_b,
+                    &ff.hbond,
+                );
             }
             if fixed.donor_for_h[b] != NO_DONOR {
                 energy += hbond_fixed_donor(fixed, b, pos_a, type_a, &ff.hbond);
             }
-            energy += c_d * charges[a] * fixed.charges[b] / r_sq;
+            energy += c_d * atoms.charges[a] * fixed.charges[b] / r_sq;
         }
     }
     energy
