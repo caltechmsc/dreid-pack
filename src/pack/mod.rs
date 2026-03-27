@@ -1,5 +1,8 @@
-pub mod config;
-pub mod constant;
-pub mod energy;
-pub mod model;
-pub mod phase;
+mod config;
+mod constant;
+mod energy;
+mod model;
+mod phase;
+
+pub use config::PackConfig;
+pub use phase::pack;
