@@ -437,7 +437,7 @@ mod tests {
         let slot = make_slot(ResidueType::Val);
         let c = sample_one(&slot, 0.0, false, false);
         assert_eq!(c.n_candidates(), 3);
-        assert_eq!(c.n_atoms(), ResidueType::Val.n_atoms() as usize);
+        assert_eq!(c.coords_of(0).len(), ResidueType::Val.n_atoms() as usize);
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod tests {
         let slot = make_slot(ResidueType::Pro);
         let c = sample_one(&slot, 0.0, false, false);
         assert_eq!(c.n_candidates(), 2);
-        assert_eq!(c.n_atoms(), ResidueType::Pro.n_atoms() as usize);
+        assert_eq!(c.coords_of(0).len(), ResidueType::Pro.n_atoms() as usize);
     }
 
     #[test]
@@ -511,7 +511,7 @@ mod tests {
         let slot = make_slot_omega(ResidueType::Pro, 0.0);
         let c = sample_one(&slot, 0.0, false, false);
         assert_eq!(c.n_candidates(), 2);
-        assert_eq!(c.n_atoms(), ResidueType::Pro.n_atoms() as usize);
+        assert_eq!(c.coords_of(0).len(), ResidueType::Pro.n_atoms() as usize);
     }
 
     #[test]
@@ -543,7 +543,7 @@ mod tests {
         assert_eq!(par.len(), seq.len());
         for (p, s) in par.iter().zip(seq.iter()) {
             assert_eq!(p.n_candidates(), s.n_candidates());
-            assert_eq!(p.n_atoms(), s.n_atoms());
+            assert_eq!(p.coords_of(0).len(), s.coords_of(0).len());
         }
     }
 
