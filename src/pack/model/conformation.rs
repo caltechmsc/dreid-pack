@@ -27,11 +27,6 @@ impl Conformations {
         self.n_candidates as usize
     }
 
-    /// Number of sidechain atoms per candidate.
-    pub fn n_atoms(&self) -> usize {
-        self.n_atoms as usize
-    }
-
     /// Atom coordinates for candidate `c`.
     pub fn coords_of(&self, c: usize) -> &[Vec3] {
         debug_assert!(
@@ -94,14 +89,13 @@ mod tests {
     fn new_stores_counts() {
         let c = three_by_two();
         assert_eq!(c.n_candidates(), 3);
-        assert_eq!(c.n_atoms(), 2);
+        assert_eq!(c.coords_of(0).len(), 2);
     }
 
     #[test]
     fn new_with_zero_candidates() {
         let c = Conformations::new(vec![], 0, 5);
         assert_eq!(c.n_candidates(), 0);
-        assert_eq!(c.n_atoms(), 5);
     }
 
     #[test]
@@ -157,7 +151,7 @@ mod tests {
         let mut c = three_by_two();
         c.compact(&[1]);
         assert_eq!(c.n_candidates(), 1);
-        assert_eq!(c.n_atoms(), 2);
+        assert_eq!(c.coords_of(0).len(), 2);
     }
 
     #[test]
