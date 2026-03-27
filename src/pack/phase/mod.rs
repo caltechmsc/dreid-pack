@@ -1,3 +1,4 @@
+pub mod dee;
 pub mod graph;
 pub mod pair;
 pub mod prune;
