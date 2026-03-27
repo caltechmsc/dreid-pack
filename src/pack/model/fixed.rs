@@ -62,16 +62,6 @@ impl<'a> FixedAtoms<'a> {
         }
     }
 
-    /// Number of fixed atoms.
-    pub fn len(&self) -> usize {
-        self.positions.len()
-    }
-
-    /// Returns `true` if there are no fixed atoms.
-    pub fn is_empty(&self) -> bool {
-        self.positions.is_empty()
-    }
-
     /// Yields `(position, atom_index)` for every fixed atom within `radius` Å
     /// of `center` (exact Euclidean distance ≤ `radius`).
     pub fn neighbors(&self, center: Vec3, radius: f32) -> impl Iterator<Item = (Vec3, u32)> + '_ {
@@ -109,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn build_from_empty_pool_is_empty() {
+    fn build_from_empty_pool_has_no_positions() {
         let pool = FixedAtomPool {
             positions: vec![],
             types: vec![],
@@ -117,16 +107,14 @@ mod tests {
             donor_for_h: vec![],
         };
         let fa = FixedAtoms::build(&pool, 8.0);
-        assert!(fa.is_empty());
-        assert_eq!(fa.len(), 0);
+        assert!(fa.positions.is_empty());
     }
 
     #[test]
-    fn len_matches_pool_atom_count() {
+    fn positions_len_matches_pool_atom_count() {
         let pool = linear_pool(7, 2.0);
         let fa = FixedAtoms::build(&pool, 8.0);
-        assert!(!fa.is_empty());
-        assert_eq!(fa.len(), 7);
+        assert_eq!(fa.positions.len(), 7);
     }
 
     #[test]
