@@ -766,7 +766,7 @@ mod tests {
         ];
         let graph = ContactGraph::build(2, [(0, 1)]);
         let table = pair(&[slot.clone(), slot], &confs, &graph, &ff, None);
-        assert_abs_diff_eq!(table.get(0, 0, 0), -d0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(0)[0], -d0, epsilon = 1e-5);
     }
 
     #[test]
@@ -783,10 +783,10 @@ mod tests {
         ];
         let graph = ContactGraph::build(2, [(0, 1)]);
         let table = pair(&[slot.clone(), slot], &confs, &graph, &ff, None);
-        assert_abs_diff_eq!(table.get(0, 0, 0), -d0, epsilon = 1e-5);
-        assert_abs_diff_eq!(table.get(0, 0, 1), 0.0, epsilon = 1e-5);
-        assert_abs_diff_eq!(table.get(0, 1, 0), 0.0, epsilon = 1e-5);
-        assert_abs_diff_eq!(table.get(0, 1, 1), 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(0)[0], -d0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(0)[1], 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(0)[2], 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(0)[3], 0.0, epsilon = 1e-5);
     }
 
     #[test]
@@ -803,8 +803,8 @@ mod tests {
             confs_from(1, &[&[v(r, 0.0, 0.0)]]),
         ];
         let graph = ContactGraph::build(2, [(0, 1)]);
-        let e_no = pair(&[slot_i.clone(), slot_j.clone()], &confs, &graph, &ff, None).get(0, 0, 0);
-        let e_yes = pair(&[slot_i, slot_j], &confs, &graph, &ff, Some(diel)).get(0, 0, 0);
+        let e_no = pair(&[slot_i.clone(), slot_j.clone()], &confs, &graph, &ff, None).matrix(0)[0];
+        let e_yes = pair(&[slot_i, slot_j], &confs, &graph, &ff, Some(diel)).matrix(0)[0];
         assert!(
             e_yes < e_no,
             "electrostatics must lower energy for opposite charges: no={e_no}, yes={e_yes}",
@@ -832,8 +832,8 @@ mod tests {
             &ff,
             None,
         );
-        assert_abs_diff_eq!(table.get(0, 0, 0), -d0, epsilon = 1e-5);
-        assert_abs_diff_eq!(table.get(1, 0, 0), 0.0, epsilon = 1e-5);
-        assert_abs_diff_eq!(table.get(2, 0, 0), 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(0)[0], -d0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(1)[0], 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(table.matrix(2)[0], 0.0, epsilon = 1e-5);
     }
 }
