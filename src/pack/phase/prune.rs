@@ -147,10 +147,11 @@ fn self_energy<V: VdwKernel, const COUL: bool>(
     let query_r = if COUL { COULOMB_CUTOFF } else { VDW_CUTOFF };
     let mut e = 0.0_f32;
 
-    for a in 0..atoms.n_a {
-        let pos_a = coords[a];
-        let ta = atoms.types[a];
-
+    for (pos_a, (&ta, &qa)) in coords
+        .iter()
+        .copied()
+        .zip(atoms.types.iter().zip(atoms.charges))
+    {
         for (pos_b, b) in fixed.neighbors(pos_a, query_r) {
             let b = b as usize;
             let tb = fixed.types[b];
@@ -175,7 +176,7 @@ fn self_energy<V: VdwKernel, const COUL: bool>(
                 }
             }
 
-            e += coulomb_energy::<COUL>(c_d, atoms.charges[a], fixed.charges[b], r_sq);
+            e += coulomb_energy::<COUL>(c_d, qa, fixed.charges[b], r_sq);
         }
     }
 
