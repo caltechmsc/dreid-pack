@@ -86,16 +86,6 @@ impl ContactGraph {
         self.edges.len()
     }
 
-    /// Returns slot indices that contact slot `s`.
-    pub fn neighbors(&self, s: usize) -> &[u32] {
-        debug_assert!(
-            s < self.n_slots(),
-            "slot {s} out of bounds (n_slots={})",
-            self.n_slots(),
-        );
-        &self.adj_list[self.adj_offsets[s] as usize..self.adj_offsets[s + 1] as usize]
-    }
-
     /// Returns `(neighbor, edge_idx, s_is_left)` for each slot adjacent to `s`,
     /// where `s_is_left` is `true` when `s < neighbor`.
     pub fn neighbor_edges(&self, s: usize) -> impl Iterator<Item = (u32, u32, bool)> + '_ {
@@ -122,12 +112,6 @@ impl ContactGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn neighbors_sorted(g: &ContactGraph, s: usize) -> Vec<u32> {
-        let mut v = g.neighbors(s).to_vec();
-        v.sort_unstable();
-        v
-    }
 
     fn neighbor_edges_sorted(g: &ContactGraph, s: usize) -> Vec<(u32, u32, bool)> {
         let mut v: Vec<_> = g.neighbor_edges(s).collect();
@@ -203,16 +187,16 @@ mod tests {
     #[test]
     fn neighbors_are_symmetric() {
         let g = ContactGraph::build(4, [(0u32, 3u32), (1, 2)]);
-        assert!(g.neighbors(0).contains(&3));
-        assert!(g.neighbors(3).contains(&0));
-        assert!(g.neighbors(1).contains(&2));
-        assert!(g.neighbors(2).contains(&1));
+        assert!(g.neighbor_edges(0).any(|(j, _, _)| j == 3));
+        assert!(g.neighbor_edges(3).any(|(j, _, _)| j == 0));
+        assert!(g.neighbor_edges(1).any(|(j, _, _)| j == 2));
+        assert!(g.neighbor_edges(2).any(|(j, _, _)| j == 1));
     }
 
     #[test]
     fn isolated_slot_has_empty_neighbors() {
         let g = ContactGraph::build(5, [(0, 1)]);
-        assert_eq!(g.neighbors(4), &[]);
+        assert!(g.neighbor_edges(4).next().is_none());
     }
 
     #[test]
@@ -223,9 +207,14 @@ mod tests {
     #[test]
     fn triangle_each_slot_has_two_neighbors() {
         let g = triangle();
-        assert_eq!(neighbors_sorted(&g, 0), vec![1u32, 2]);
-        assert_eq!(neighbors_sorted(&g, 1), vec![0u32, 2]);
-        assert_eq!(neighbors_sorted(&g, 2), vec![0u32, 1]);
+        let nbrs = |s| -> Vec<u32> {
+            let mut v: Vec<u32> = g.neighbor_edges(s).map(|(j, _, _)| j).collect();
+            v.sort_unstable();
+            v
+        };
+        assert_eq!(nbrs(0), vec![1u32, 2]);
+        assert_eq!(nbrs(1), vec![0u32, 2]);
+        assert_eq!(nbrs(2), vec![0u32, 1]);
     }
 
     #[test]
@@ -270,14 +259,6 @@ mod tests {
     #[should_panic]
     fn build_panics_on_n_slots_overflow() {
         ContactGraph::build(u32::MAX as usize + 2, []);
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    fn neighbors_panics_out_of_bounds() {
-        let g = ContactGraph::build(3, []);
-        let _ = g.neighbors(3);
     }
 
     #[test]
