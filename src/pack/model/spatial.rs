@@ -170,16 +170,6 @@ impl<T: Copy> SpatialGrid<T> {
         }
     }
 
-    /// Number of items stored in the grid.
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-
-    /// Returns `true` if the grid contains no items.
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
     /// Computes the `[lo, hi]` cell-index range that the AABB
     /// `[center ± radius]` overlaps, clamped to `[0, dims-1]`.
     fn cell_range(&self, center: Vec3, radius: f32) -> ([usize; 3], [usize; 3]) {
@@ -312,18 +302,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_grid_has_zero_len() {
-        let g = SpatialGrid::<u32>::build(std::iter::empty(), 5.0);
-        assert!(g.is_empty());
-        assert_eq!(g.len(), 0);
-    }
-
-    #[test]
-    fn len_matches_item_count() {
+    fn all_items_queryable_after_build() {
         let items: Vec<_> = (0u32..10).map(|i| (v(i as f32, 0.0, 0.0), i)).collect();
         let g = SpatialGrid::build(items, 2.0);
-        assert_eq!(g.len(), 10);
-        assert!(!g.is_empty());
+        assert_eq!(g.query(v(5.0, 0.0, 0.0), 200.0).count(), 10);
     }
 
     #[test]
@@ -431,7 +413,6 @@ mod tests {
     #[test]
     fn atom_at_aabb_maximum_is_stored_and_queryable() {
         let g = SpatialGrid::build([(v(0.0, 0.0, 0.0), 0u32), (v(10.0, 10.0, 10.0), 1u32)], 5.0);
-        assert_eq!(g.len(), 2);
         assert_eq!(g.query(v(10.0, 10.0, 10.0), 0.1).count(), 1);
     }
 
