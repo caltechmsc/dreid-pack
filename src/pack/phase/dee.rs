@@ -330,3 +330,329 @@ fn absorb(
         fixed[fi] = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn two_slot(
+        counts: [u16; 2],
+        pair_data: &[f32],
+    ) -> (SelfEnergyTable, PairEnergyTable, ContactGraph) {
+        let self_e = SelfEnergyTable::new(&counts);
+        let pair_e = PairEnergyTable::new(&[(counts[0], counts[1])]);
+        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
+        debug_assert_eq!(pair_data.len(), counts[0] as usize * counts[1] as usize);
+        let mut pair_e = pair_e;
+        let (ni, nj) = (counts[0] as usize, counts[1] as usize);
+        for ri in 0..ni {
+            for rj in 0..nj {
+                pair_e.set(0, ri, rj, pair_data[ri * nj + rj]);
+            }
+        }
+        (self_e, pair_e, graph)
+    }
+
+    fn alive(self_e: &SelfEnergyTable, s: usize) -> Vec<usize> {
+        (0..self_e.n_candidates(s))
+            .filter(|&r| !self_e.is_pruned(s, r))
+            .collect()
+    }
+
+    #[test]
+    fn goldstein_no_neighbors_eliminates_locally_dominated_candidate() {
+        let mut self_e = SelfEnergyTable::new(&[3]);
+        self_e.set(0, 0, 5.0);
+        self_e.set(0, 1, 2.0);
+        self_e.set(0, 2, 3.0);
+        let pair_e = PairEnergyTable::new(&[]);
+        let graph = ContactGraph::build(1, std::iter::empty::<(u32, u32)>());
+        let fixed = vec![false];
+
+        let mut dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+        dead.sort_unstable();
+        assert_eq!(dead, [0, 2]);
+    }
+
+    #[test]
+    fn goldstein_no_neighbors_tied_candidates_both_survive() {
+        let mut self_e = SelfEnergyTable::new(&[3]);
+        self_e.set(0, 0, 3.0);
+        self_e.set(0, 1, 3.0);
+        self_e.set(0, 2, 5.0);
+        let pair_e = PairEnergyTable::new(&[]);
+        let graph = ContactGraph::build(1, std::iter::empty::<(u32, u32)>());
+        let fixed = vec![false];
+
+        let dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert_eq!(dead, [2]);
+    }
+
+    #[test]
+    fn goldstein_equal_self_energy_does_not_eliminate() {
+        let mut self_e = SelfEnergyTable::new(&[2]);
+        self_e.set(0, 0, 3.0);
+        self_e.set(0, 1, 3.0);
+        let pair_e = PairEnergyTable::new(&[]);
+        let graph = ContactGraph::build(1, std::iter::empty::<(u32, u32)>());
+        let fixed = vec![false];
+
+        let dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert!(dead.is_empty());
+    }
+
+    #[test]
+    fn goldstein_with_neighbor_eliminates_dominated_candidate() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[1.0, 2.0, 3.0, 4.0]);
+        self_e.set(0, 0, 5.0);
+        self_e.set(0, 1, 2.0);
+        let fixed = vec![false, false];
+
+        let dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert_eq!(dead, [0]);
+    }
+
+    #[test]
+    fn goldstein_with_neighbor_saved_by_pair_term() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[-10.0, -10.0, 0.0, 0.0]);
+        self_e.set(0, 0, 5.0);
+        self_e.set(0, 1, 2.0);
+        let fixed = vec![false, false];
+
+        let dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert!(!dead.contains(&0));
+    }
+
+    #[test]
+    fn goldstein_fixed_neighbor_is_skipped() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[-5.0, -5.0, 0.0, 0.0]);
+        self_e.set(0, 0, 5.0);
+        self_e.set(0, 1, 2.0);
+
+        let dead_unfixed = goldstein_slot(0, &self_e, &pair_e, &graph, &[false, false]);
+        assert!(
+            !dead_unfixed.contains(&0),
+            "pair term should rescue candidate 0 when unfixed"
+        );
+
+        let dead_fixed = goldstein_slot(0, &self_e, &pair_e, &graph, &[false, true]);
+        assert!(
+            dead_fixed.contains(&0),
+            "candidate 0 must be eliminated when neighbor is fixed"
+        );
+    }
+
+    #[test]
+    fn goldstein_skips_already_pruned_candidates() {
+        let mut self_e = SelfEnergyTable::new(&[3]);
+        self_e.set(0, 0, 1.0);
+        self_e.set(0, 1, 5.0);
+        self_e.set(0, 2, 9.0);
+        self_e.prune(0, 2);
+        let pair_e = PairEnergyTable::new(&[]);
+        let graph = ContactGraph::build(1, std::iter::empty::<(u32, u32)>());
+        let fixed = vec![false];
+
+        let dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert!(dead.contains(&1));
+        assert!(!dead.contains(&2));
+    }
+
+    #[test]
+    fn goldstein_eliminates_candidate_from_right_side_of_edge() {
+        let (self_e, pair_e, graph) = two_slot([2, 2], &[0.0, 2.0, 0.0, 2.0]);
+        let fixed = vec![false, false];
+
+        let dead = goldstein_slot(1, &self_e, &pair_e, &graph, &fixed);
+
+        assert_eq!(dead, [1]);
+    }
+
+    #[test]
+    fn split_eliminates_candidate_when_goldstein_cannot() {
+        let (self_e, pair_e, graph) = two_slot([3, 2], &[10.0, -10.0, 11.0, -15.0, 0.0, 5.0]);
+        let fixed = vec![false, false];
+
+        let g_dead = goldstein_slot(0, &self_e, &pair_e, &graph, &fixed);
+        assert!(
+            !g_dead.contains(&0),
+            "Goldstein must not eliminate s=0 in this case"
+        );
+
+        let s_dead = split_slot(0, &self_e, &pair_e, &graph, &fixed);
+        assert!(s_dead.contains(&0), "Split must eliminate s=0");
+    }
+
+    #[test]
+    fn split_does_not_fire_when_criterion_fails_for_some_vk() {
+        let (self_e, pair_e, graph) = two_slot([2, 2], &[5.0, -100.0, 0.0, 0.0]);
+        let fixed = vec![false, false];
+
+        let dead = split_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert!(!dead.contains(&0));
+    }
+
+    #[test]
+    fn split_with_single_candidate_produces_no_dead() {
+        let mut self_e = SelfEnergyTable::new(&[2, 2]);
+        self_e.set(0, 0, 0.0);
+        self_e.prune(0, 1);
+        let pair_e = PairEnergyTable::new(&[(2, 2)]);
+        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
+        let fixed = vec![false, false];
+
+        let dead = split_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert!(dead.is_empty());
+    }
+
+    #[test]
+    fn split_with_no_neighbors_produces_no_dead() {
+        let mut self_e = SelfEnergyTable::new(&[3]);
+        self_e.set(0, 0, 1.0);
+        self_e.set(0, 1, 5.0);
+        let pair_e = PairEnergyTable::new(&[]);
+        let graph = ContactGraph::build(1, std::iter::empty::<(u32, u32)>());
+        let fixed = vec![false];
+
+        let dead = split_slot(0, &self_e, &pair_e, &graph, &fixed);
+
+        assert!(dead.is_empty());
+    }
+
+    #[test]
+    fn absorb_folds_pair_energy_into_unfixed_neighbor() {
+        let (mut self_e, pair_e, graph) = two_slot([1, 2], &[3.0, 7.0]);
+        let mut fixed = vec![false, false];
+
+        absorb(&mut self_e, &pair_e, &graph, &mut fixed);
+
+        assert_eq!(self_e.get(1, 0), 3.0);
+        assert_eq!(self_e.get(1, 1), 7.0);
+        assert!(fixed[0]);
+        assert!(!fixed[1]);
+    }
+
+    #[test]
+    fn absorb_does_not_touch_multi_candidate_slot() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[1.0, 2.0, 3.0, 4.0]);
+        let mut fixed = vec![false, false];
+
+        absorb(&mut self_e, &pair_e, &graph, &mut fixed);
+
+        assert!(!fixed[0]);
+        assert!(!fixed[1]);
+        assert_eq!(self_e.get(0, 0), 0.0);
+        assert_eq!(self_e.get(1, 0), 0.0);
+    }
+
+    #[test]
+    fn absorb_skips_already_fixed_neighbor() {
+        let (mut self_e, pair_e, graph) = two_slot([1, 1], &[5.0]);
+        let mut fixed = vec![false, true];
+
+        absorb(&mut self_e, &pair_e, &graph, &mut fixed);
+
+        assert_eq!(self_e.get(1, 0), 0.0);
+        assert!(fixed[0]);
+    }
+
+    #[test]
+    fn absorb_no_op_when_all_already_fixed() {
+        let (mut self_e, pair_e, graph) = two_slot([1, 2], &[3.0, 7.0]);
+        let mut fixed = vec![true, false];
+
+        absorb(&mut self_e, &pair_e, &graph, &mut fixed);
+
+        assert_eq!(self_e.get(1, 0), 0.0);
+        assert_eq!(self_e.get(1, 1), 0.0);
+    }
+
+    #[test]
+    fn absorb_skips_pruned_candidates_at_neighbor() {
+        let (mut self_e, pair_e, graph) = two_slot([1, 2], &[3.0, 7.0]);
+        self_e.prune(1, 1);
+        let mut fixed = vec![false, false];
+
+        absorb(&mut self_e, &pair_e, &graph, &mut fixed);
+
+        assert_eq!(self_e.get(1, 0), 3.0);
+        assert_eq!(self_e.get(1, 1), f32::INFINITY);
+    }
+
+    #[test]
+    fn absorb_right_side_fixed_slot_absorbs_into_neighbor() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 1], &[3.0, 7.0]);
+        let mut fixed = vec![false, false];
+
+        absorb(&mut self_e, &pair_e, &graph, &mut fixed);
+
+        assert_eq!(self_e.get(0, 0), 3.0);
+        assert_eq!(self_e.get(0, 1), 7.0);
+        assert!(fixed[1]);
+        assert!(!fixed[0]);
+    }
+
+    #[test]
+    fn dee_no_op_on_single_candidate_slots() {
+        let (mut self_e, pair_e, graph) = two_slot([1, 1], &[1.0]);
+        let n = dee(&mut self_e, &pair_e, &graph);
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn dee_returns_total_eliminated_count() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[0.0; 4]);
+        self_e.set(0, 0, 5.0);
+        self_e.set(0, 1, 1.0);
+        self_e.set(1, 0, 3.0);
+        self_e.set(1, 1, 2.0);
+
+        let n = dee(&mut self_e, &pair_e, &graph);
+
+        assert_eq!(n, 2);
+        assert!(self_e.is_pruned(0, 0));
+        assert!(!self_e.is_pruned(0, 1));
+        assert!(self_e.is_pruned(1, 0));
+        assert!(!self_e.is_pruned(1, 1));
+    }
+
+    #[test]
+    fn dee_does_not_eliminate_equal_energy_candidates() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 1], &[0.0, 0.0]);
+        self_e.set(0, 0, 4.0);
+        self_e.set(0, 1, 4.0);
+
+        dee(&mut self_e, &pair_e, &graph);
+
+        assert!(!self_e.is_pruned(0, 0));
+        assert!(!self_e.is_pruned(0, 1));
+    }
+
+    #[test]
+    fn dee_converges_to_single_survivor_per_slot() {
+        let mut self_e = SelfEnergyTable::new(&[5, 5, 5]);
+        for s in 0..3 {
+            self_e.set(s, 0, 0.0);
+            self_e.set(s, 1, 1.0);
+            self_e.set(s, 2, 2.0);
+            self_e.set(s, 3, 3.0);
+            self_e.set(s, 4, 4.0);
+        }
+        let pair_e = PairEnergyTable::new(&[(5, 5), (5, 5)]);
+        let graph = ContactGraph::build(3, [(0u32, 1u32), (1u32, 2u32)]);
+
+        let n = dee(&mut self_e, &pair_e, &graph);
+
+        assert_eq!(n, 12);
+        for s in 0..3 {
+            assert_eq!(alive(&self_e, s), [0]);
+        }
+    }
+}
