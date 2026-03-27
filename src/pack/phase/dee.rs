@@ -10,6 +10,7 @@ use rayon::prelude::*;
 pub fn dee(self_e: &mut SelfEnergyTable, pair_e: &PairEnergyTable, graph: &ContactGraph) -> usize {
     let n = self_e.n_slots();
     debug_assert_eq!(graph.n_slots(), n);
+    debug_assert_eq!(graph.n_edges(), pair_e.n_edges());
 
     let mut fixed = vec![false; n];
 
