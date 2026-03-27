@@ -88,7 +88,6 @@ pub fn prune(
 
 /// Per-slot atom metadata shared across all candidates of the same residue.
 struct SlotAtoms<'a> {
-    n_a: usize,
     types: &'a [TypeIdx],
     charges: &'a [f32],
     donors: &'a [u8],
@@ -110,7 +109,6 @@ fn survivors<V: VdwKernel + Sync, const COUL: bool>(
         .zip(conformations.par_iter())
         .map(|(slot, confs)| {
             let atoms = SlotAtoms {
-                n_a: confs.n_atoms(),
                 types: slot.atom_types(),
                 charges: slot.atom_charges(),
                 donors: slot.donor_of_h(),
@@ -180,16 +178,17 @@ fn self_energy<V: VdwKernel, const COUL: bool>(
         }
     }
 
-    for h in 0..atoms.n_a {
-        let d_local = atoms.donors[h];
+    for (pos_h, (&d_local, &th)) in coords
+        .iter()
+        .copied()
+        .zip(atoms.donors.iter().zip(atoms.types))
+    {
         if d_local == u8::MAX {
             continue;
         }
         let d = d_local as usize;
         let pos_d = coords[d];
-        let pos_h = coords[h];
         let td = atoms.types[d];
-        let th = atoms.types[h];
 
         for (pos_acc, f) in fixed.neighbors(pos_d, HBOND_CUTOFF) {
             let r_sq_da = pos_d.dist_sq(pos_acc);
@@ -295,7 +294,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[1.0],
             donors: &[u8::MAX],
@@ -318,7 +316,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -341,7 +338,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -363,7 +359,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF + 1.0);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -386,7 +381,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, COULOMB_CUTOFF + 1.0);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -409,7 +403,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, COULOMB_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[1.0],
             donors: &[u8::MAX],
@@ -431,7 +424,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, COULOMB_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[1.0],
             donors: &[u8::MAX],
@@ -453,7 +445,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[100.0],
             donors: &[u8::MAX],
@@ -476,7 +467,6 @@ mod tests {
         let fixed = FixedAtoms::build(&pool, COULOMB_CUTOFF);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(0)],
             charges: &[qi],
             donors: &[u8::MAX],
@@ -502,7 +492,6 @@ mod tests {
         let hbond = hbond_dha(4.0, 3.0);
         let coords = [v(3.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(2)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -523,7 +512,6 @@ mod tests {
         let hbond = hbond_dha(d_hb, r_hb);
         let coords = [v(r_hb, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(2)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -540,7 +528,6 @@ mod tests {
         let hbond = hbond_dha(4.0, 3.0);
         let coords = [v(0.5, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(2)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -561,7 +548,6 @@ mod tests {
         let hbond = hbond_dha(4.0, 3.0);
         let coords = [v(d_a, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(2)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -581,7 +567,6 @@ mod tests {
         let hbond = hbond_dha(4.0, 3.0);
         let coords = [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 2,
             types: &[t(0), t(1)],
             charges: &[0.0, 0.0],
             donors: &[u8::MAX, 0],
@@ -602,7 +587,6 @@ mod tests {
         let hbond = hbond_dha(d_hb, r_hb);
         let coords = [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 2,
             types: &[t(0), t(1)],
             charges: &[0.0, 0.0],
             donors: &[u8::MAX, 0],
@@ -619,7 +603,6 @@ mod tests {
         let hbond = hbond_dha(4.0, 3.0);
         let coords = [v(0.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 1,
             types: &[t(1)],
             charges: &[0.0],
             donors: &[u8::MAX],
@@ -639,7 +622,6 @@ mod tests {
         let hbond = hbond_dha(4.0, 3.0);
         let coords = [v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)];
         let atoms = SlotAtoms {
-            n_a: 2,
             types: &[t(0), t(1)],
             charges: &[0.0, 0.0],
             donors: &[u8::MAX, 0],
