@@ -911,3 +911,280 @@ fn topo_order(tree: &[TreeNode]) -> Vec<usize> {
     order.reverse();
     order
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    fn make_matrix(n: usize, edges: &[(usize, usize)]) -> Vec<bool> {
+        let mut m = vec![false; n * n];
+        for &(a, b) in edges {
+            m[a * n + b] = true;
+            m[b * n + a] = true;
+        }
+        m
+    }
+
+    fn make_adj(n: usize, edges: &[(usize, usize)]) -> Vec<Vec<u32>> {
+        let mut adj = vec![Vec::new(); n];
+        for &(a, b) in edges {
+            adj[a].push(b as u32);
+            adj[b].push(a as u32);
+        }
+        adj
+    }
+
+    fn two_slot(
+        counts: [u16; 2],
+        pair_data: &[f32],
+    ) -> (SelfEnergyTable, PairEnergyTable, ContactGraph) {
+        let self_e = SelfEnergyTable::new(&counts);
+        let mut pair_e = PairEnergyTable::new(&[(counts[0], counts[1])]);
+        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
+        let (ni, nj) = (counts[0] as usize, counts[1] as usize);
+        for ri in 0..ni {
+            for rj in 0..nj {
+                pair_e.set(0, ri, rj, pair_data[ri * nj + rj]);
+            }
+        }
+        (self_e, pair_e, graph)
+    }
+
+    #[test]
+    fn mcs_on_path_produces_peo() {
+        let m = make_matrix(3, &[(0, 1), (1, 2)]);
+        let order = mcs_order(&m, 3);
+        assert!(is_peo(&m, 3, &order));
+    }
+
+    #[test]
+    fn mcs_on_triangle_produces_peo() {
+        let m = make_matrix(3, &[(0, 1), (0, 2), (1, 2)]);
+        let order = mcs_order(&m, 3);
+        assert!(is_peo(&m, 3, &order));
+    }
+
+    #[test]
+    fn mcs_on_four_cycle_fails_peo() {
+        let m = make_matrix(4, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
+        let order = mcs_order(&m, 4);
+        assert!(!is_peo(&m, 4, &order));
+    }
+
+    #[test]
+    fn is_peo_rejects_non_peo_order_on_chordal_graph() {
+        let m = make_matrix(3, &[(0, 1), (1, 2)]);
+        assert!(is_peo(&m, 3, &[0, 1, 2]));
+        assert!(!is_peo(&m, 3, &[1, 0, 2]));
+    }
+
+    #[test]
+    fn eliminate_empty_graph_returns_zero_width() {
+        let (bags, width) = eliminate(0, &[], 5).unwrap();
+        assert!(bags.is_empty());
+        assert_eq!(width, 0);
+    }
+
+    #[test]
+    fn eliminate_chordal_path_produces_width_one() {
+        let adj = make_adj(3, &[(0, 1), (1, 2)]);
+        let (bags, width) = eliminate(3, &adj, 5).unwrap();
+        assert_eq!(bags.len(), 3);
+        assert_eq!(width, 1);
+    }
+
+    #[test]
+    fn eliminate_non_chordal_cycle_uses_min_fill() {
+        let adj = make_adj(4, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
+        let (bags, width) = eliminate(4, &adj, 5).unwrap();
+        assert_eq!(bags.len(), 4);
+        assert_eq!(width, 2);
+    }
+
+    #[test]
+    fn eliminate_returns_none_when_width_exceeds_cutoff() {
+        let adj = make_adj(4, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
+        assert!(eliminate(4, &adj, 1).is_none());
+    }
+
+    #[test]
+    fn eliminate_isolated_vertices_produce_empty_separators() {
+        let adj: Vec<Vec<u32>> = vec![vec![], vec![], vec![]];
+        let (bags, width) = eliminate(3, &adj, 0).unwrap();
+        assert_eq!(bags.len(), 3);
+        assert_eq!(width, 0);
+        for bag in &bags {
+            assert!(bag.sep.is_empty());
+        }
+    }
+
+    #[test]
+    fn root_tree_single_bag_has_no_children() {
+        let bags = vec![Bag {
+            elim: 0,
+            sep: vec![],
+        }];
+        let tree = root_tree(&bags);
+        assert_eq!(tree.len(), 1);
+        assert!(tree[0].children.is_empty());
+        assert!(tree[0].sep.is_empty());
+    }
+
+    #[test]
+    fn root_tree_chain_preserves_parent_child_structure() {
+        let bags = vec![
+            Bag {
+                elim: 2,
+                sep: vec![1],
+            },
+            Bag {
+                elim: 1,
+                sep: vec![0],
+            },
+            Bag {
+                elim: 0,
+                sep: vec![],
+            },
+        ];
+        let tree = root_tree(&bags);
+        assert_eq!(tree.len(), 3);
+        assert_eq!(tree[0].elim, 0);
+        assert_eq!(tree[0].children, [1]);
+        assert_eq!(tree[1].elim, 1);
+        assert_eq!(tree[1].children, [2]);
+        assert!(tree[2].children.is_empty());
+    }
+
+    #[test]
+    fn root_tree_root_has_empty_separator() {
+        let adj = make_adj(4, &[(0, 1), (1, 2), (2, 3)]);
+        let (bags, _) = eliminate(4, &adj, 5).unwrap();
+        let tree = root_tree(&bags);
+        assert!(tree[0].sep.is_empty());
+    }
+
+    #[test]
+    fn edge_decompose_removes_exact_rank1_edge() {
+        let (_self_e, pair_e, graph) = two_slot([2, 2], &[1.0, 3.0, 3.0, 5.0]);
+
+        let mut adj = vec![vec![1u32], vec![0u32]];
+        let mut work_edges = vec![(0u32, 1u32, 0u32)];
+        let mut local_self = vec![vec![0.0, 0.0], vec![0.0, 0.0]];
+
+        edge_decompose(
+            &mut adj,
+            &mut work_edges,
+            &mut local_self,
+            |ci| ci,
+            &pair_e,
+            &graph,
+            0.5,
+        );
+
+        assert!(work_edges.is_empty(), "rank-1 edge should be removed");
+        assert!(adj[0].is_empty());
+
+        assert_abs_diff_eq!(local_self[0][0], 0.5, epsilon = 1e-5);
+        assert_abs_diff_eq!(local_self[0][1], 2.5, epsilon = 1e-5);
+        assert_abs_diff_eq!(local_self[1][0], 0.5, epsilon = 1e-5);
+        assert_abs_diff_eq!(local_self[1][1], 2.5, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn edge_decompose_keeps_non_rank1_edge() {
+        let (_self_e, pair_e, graph) = two_slot([2, 2], &[10.0, 0.0, 0.0, 10.0]);
+
+        let mut adj = vec![vec![1u32], vec![0u32]];
+        let mut work_edges = vec![(0u32, 1u32, 0u32)];
+        let mut local_self = vec![vec![0.0, 0.0], vec![0.0, 0.0]];
+
+        edge_decompose(
+            &mut adj,
+            &mut work_edges,
+            &mut local_self,
+            |ci| ci,
+            &pair_e,
+            &graph,
+            0.5,
+        );
+
+        assert_eq!(work_edges.len(), 1, "non-rank-1 edge must survive");
+        assert_abs_diff_eq!(local_self[0][0], 0.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn dp_all_single_candidate_returns_zeros() {
+        let mut self_e = SelfEnergyTable::new(&[1, 1]);
+        let pair_e = PairEnergyTable::new(&[(1, 1)]);
+        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
+
+        assert_eq!(dp(&mut self_e, &pair_e, &graph), [0, 0]);
+    }
+
+    #[test]
+    fn dp_independent_slots_pick_minimum_self_energy() {
+        let mut self_e = SelfEnergyTable::new(&[3, 3]);
+        self_e.set(0, 0, 5.0);
+        self_e.set(0, 1, 1.0);
+        self_e.set(0, 2, 3.0);
+        self_e.set(1, 0, 4.0);
+        self_e.set(1, 1, 2.0);
+        self_e.set(1, 2, 6.0);
+
+        let pair_e = PairEnergyTable::new(&[(3, 3)]);
+        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
+
+        let result = dp(&mut self_e, &pair_e, &graph);
+        assert_eq!(result[0], 1);
+        assert_eq!(result[1], 1);
+    }
+
+    #[test]
+    fn dp_two_slot_chain_picks_gmec() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[0.0, 10.0, 10.0, 0.0]);
+        self_e.set(0, 1, 1.0);
+        let result = dp(&mut self_e, &pair_e, &graph);
+        assert_eq!(result, [0, 0]);
+    }
+
+    #[test]
+    fn dp_pair_energy_overrides_self_preference() {
+        let (mut self_e, pair_e, graph) = two_slot([2, 2], &[20.0, 0.0, 0.0, 0.0]);
+        self_e.set(0, 1, 5.0);
+        self_e.set(1, 1, 5.0);
+
+        let result = dp(&mut self_e, &pair_e, &graph);
+        let e = self_e.get(0, result[0])
+            + self_e.get(1, result[1])
+            + pair_val(pair_e.matrix(0), 2, true, result[0], result[1]);
+        assert_abs_diff_eq!(e, 5.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn dp_three_slot_triangle_prefers_matching_rotamers() {
+        let mut self_e = SelfEnergyTable::new(&[2, 2, 2]);
+        let mut pair_e = PairEnergyTable::new(&[(2, 2), (2, 2), (2, 2)]);
+        let graph = ContactGraph::build(3, [(0u32, 1u32), (0u32, 2u32), (1u32, 2u32)]);
+
+        for edge in 0..3 {
+            pair_e.set(edge, 0, 1, 10.0);
+            pair_e.set(edge, 1, 0, 10.0);
+        }
+
+        let result = dp(&mut self_e, &pair_e, &graph);
+        assert_eq!(result[0], result[1]);
+        assert_eq!(result[1], result[2]);
+    }
+
+    #[test]
+    fn dp_skips_pruned_candidates() {
+        let (mut self_e, pair_e, graph) = two_slot([3, 2], &[0.0, 0.0, 0.0, 0.0, 5.0, 5.0]);
+        self_e.set(0, 1, 2.0);
+        self_e.set(0, 2, 3.0);
+        self_e.prune(0, 0);
+
+        let result = dp(&mut self_e, &pair_e, &graph);
+        assert_ne!(result[0], 0, "pruned candidate must not be selected");
+    }
+}
