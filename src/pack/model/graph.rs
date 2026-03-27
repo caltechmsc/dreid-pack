@@ -5,6 +5,7 @@
 pub struct ContactGraph {
     adj_offsets: Vec<u32>,
     adj_list: Vec<u32>,
+    adj_edge_idx: Vec<u32>,
     edges: Vec<(u32, u32)>,
 }
 
@@ -52,18 +53,25 @@ impl ContactGraph {
 
         let total_neighbors = adj_offsets[n_slots] as usize;
         let mut adj_list = vec![0u32; total_neighbors];
+        let mut adj_edge_idx = vec![0u32; total_neighbors];
         let mut cursor = degree;
         cursor[..n_slots].copy_from_slice(&adj_offsets[..n_slots]);
-        for &(a, b) in &edges {
-            adj_list[cursor[a as usize] as usize] = b;
+        for (edge_idx, &(a, b)) in edges.iter().enumerate() {
+            let pa = cursor[a as usize] as usize;
+            adj_list[pa] = b;
+            adj_edge_idx[pa] = edge_idx as u32;
             cursor[a as usize] += 1;
-            adj_list[cursor[b as usize] as usize] = a;
+
+            let pb = cursor[b as usize] as usize;
+            adj_list[pb] = a;
+            adj_edge_idx[pb] = edge_idx as u32;
             cursor[b as usize] += 1;
         }
 
         Self {
             adj_offsets,
             adj_list,
+            adj_edge_idx,
             edges,
         }
     }
@@ -88,6 +96,22 @@ impl ContactGraph {
         &self.adj_list[self.adj_offsets[s] as usize..self.adj_offsets[s + 1] as usize]
     }
 
+    /// Returns `(neighbor, edge_idx, s_is_left)` for each slot adjacent to `s`,
+    /// where `s_is_left` is `true` when `s < neighbor`.
+    pub fn neighbor_edges(&self, s: usize) -> impl Iterator<Item = (u32, u32, bool)> + '_ {
+        debug_assert!(
+            s < self.n_slots(),
+            "slot {s} out of bounds (n_slots={})",
+            self.n_slots(),
+        );
+        let start = self.adj_offsets[s] as usize;
+        let end = self.adj_offsets[s + 1] as usize;
+        self.adj_list[start..end]
+            .iter()
+            .zip(&self.adj_edge_idx[start..end])
+            .map(move |(&j, &e)| (j, e, (s as u32) < j))
+    }
+
     /// Returns the list of edges as `(a, b)` pairs with `a < b`,
     /// and sorted lexicographically.
     pub fn edges(&self) -> &[(u32, u32)] {
@@ -102,6 +126,12 @@ mod tests {
     fn neighbors_sorted(g: &ContactGraph, s: usize) -> Vec<u32> {
         let mut v = g.neighbors(s).to_vec();
         v.sort_unstable();
+        v
+    }
+
+    fn neighbor_edges_sorted(g: &ContactGraph, s: usize) -> Vec<(u32, u32, bool)> {
+        let mut v: Vec<_> = g.neighbor_edges(s).collect();
+        v.sort_unstable_by_key(|&(j, _, _)| j);
         v
     }
 
@@ -199,6 +229,44 @@ mod tests {
     }
 
     #[test]
+    fn neighbor_edges_triangle_each_slot_correct() {
+        let g = triangle();
+        assert_eq!(
+            neighbor_edges_sorted(&g, 0),
+            vec![(1, 0, true), (2, 1, true)]
+        );
+        assert_eq!(
+            neighbor_edges_sorted(&g, 1),
+            vec![(0, 0, false), (2, 2, true)]
+        );
+        assert_eq!(
+            neighbor_edges_sorted(&g, 2),
+            vec![(0, 1, false), (1, 2, false)]
+        );
+    }
+
+    #[test]
+    fn neighbor_edges_isolated_slot_is_empty() {
+        let g = ContactGraph::build(5, [(0u32, 1u32)]);
+        assert_eq!(g.neighbor_edges(4).count(), 0);
+    }
+
+    #[test]
+    fn neighbor_edges_edge_idx_consistent_with_edges() {
+        let g = ContactGraph::build(5, [(1u32, 4u32), (2, 3)]);
+        for s in 0..g.n_slots() {
+            for (j, e, is_left) in g.neighbor_edges(s) {
+                let (a, b) = g.edges()[e as usize];
+                if is_left {
+                    assert_eq!((a, b), (s as u32, j));
+                } else {
+                    assert_eq!((a, b), (j, s as u32));
+                }
+            }
+        }
+    }
+
+    #[test]
     #[should_panic]
     fn build_panics_on_n_slots_overflow() {
         ContactGraph::build(u32::MAX as usize + 2, []);
@@ -210,5 +278,13 @@ mod tests {
     fn neighbors_panics_out_of_bounds() {
         let g = ContactGraph::build(3, []);
         let _ = g.neighbors(3);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn neighbor_edges_panics_out_of_bounds() {
+        let g = ContactGraph::build(3, []);
+        let _ = g.neighbor_edges(3);
     }
 }
