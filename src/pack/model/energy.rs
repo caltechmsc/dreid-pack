@@ -1,3 +1,6 @@
+/// Sentinel value marking a dead candidate in [`SelfEnergyTable`].
+pub const PRUNED: f32 = f32::INFINITY;
+
 /// Self-energy for every (slot, candidate) pair.
 pub struct SelfEnergyTable {
     data: Vec<f32>,
@@ -63,14 +66,14 @@ impl SelfEnergyTable {
         self.data[self.offsets[s] + r] = val;
     }
 
-    /// Marks candidate `r` in slot `s` as dead (energy -> `INFINITY`).
+    /// Marks candidate `r` in slot `s` as dead (energy -> [`PRUNED`]).
     pub fn prune(&mut self, s: usize, r: usize) {
-        self.set(s, r, f32::INFINITY);
+        self.set(s, r, PRUNED);
     }
 
     /// Returns `true` if candidate `r` in slot `s` has been pruned.
     pub fn is_pruned(&self, s: usize, r: usize) -> bool {
-        self.get(s, r) == f32::INFINITY
+        self.get(s, r) == PRUNED
     }
 
     /// Physically removes pruned candidates and rebuilds offsets.
@@ -87,7 +90,7 @@ impl SelfEnergyTable {
             let base = self.offsets[s];
             let count = self.offsets[s + 1] - base;
             let alive: Vec<u16> = (0..count)
-                .filter(|&r| self.data[base + r] != f32::INFINITY)
+                .filter(|&r| self.data[base + r] != PRUNED)
                 .map(|r| r as u16)
                 .collect();
             for &orig in &alive {
@@ -228,7 +231,7 @@ mod tests {
     fn self_prune_sets_infinity() {
         let mut t = SelfEnergyTable::new(&[4]);
         t.prune(0, 1);
-        assert_eq!(t.get(0, 1), f32::INFINITY);
+        assert_eq!(t.get(0, 1), PRUNED);
     }
 
     #[test]

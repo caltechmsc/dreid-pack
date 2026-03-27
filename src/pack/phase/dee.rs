@@ -1,5 +1,5 @@
 use crate::pack::model::{
-    energy::{PairEnergyTable, SelfEnergyTable},
+    energy::{PRUNED, PairEnergyTable, SelfEnergyTable},
     graph::ContactGraph,
 };
 use rayon::prelude::*;
@@ -140,7 +140,7 @@ fn goldstein_slot(
             for &(j, mat, stride, is_left) in &edges {
                 let nc_j = self_e.n_candidates(j);
 
-                let mut min_diff = f32::INFINITY;
+                let mut min_diff = PRUNED;
                 for t in 0..nc_j {
                     if self_e.is_pruned(j, t) {
                         continue;
@@ -222,7 +222,7 @@ fn split_slot(
         for (ci, &r) in comp_buf.iter().enumerate() {
             for (ki, &(j, mat, stride, is_left)) in neighbors.iter().enumerate() {
                 let nc_j = self_e.n_candidates(j);
-                let mut min_v = f32::INFINITY;
+                let mut min_v = PRUNED;
                 for t in 0..nc_j {
                     if self_e.is_pruned(j, t) {
                         continue;
@@ -584,7 +584,7 @@ mod tests {
         absorb(&mut self_e, &pair_e, &graph, &mut fixed);
 
         assert_eq!(self_e.get(1, 0), 3.0);
-        assert_eq!(self_e.get(1, 1), f32::INFINITY);
+        assert_eq!(self_e.get(1, 1), PRUNED);
     }
 
     #[test]

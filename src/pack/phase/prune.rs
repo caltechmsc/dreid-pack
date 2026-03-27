@@ -10,7 +10,7 @@ use crate::{
         energy::{BuckKernel, LjKernel, VdwKernel, cos_dha, coulomb_energy, hbond_energy},
         model::{
             conformation::Conformations,
-            energy::SelfEnergyTable,
+            energy::{PRUNED, SelfEnergyTable},
             fixed::{FixedAtoms, NO_DONOR},
         },
     },
@@ -119,7 +119,7 @@ fn survivors<V: VdwKernel + Sync, const COUL: bool>(
                 .map(|r| self_energy::<V, COUL>(confs.coords_of(r), &atoms, fixed, vdw, hbond, c_d))
                 .collect();
 
-            let e_min = energies.iter().copied().fold(f32::INFINITY, f32::min);
+            let e_min = energies.iter().copied().fold(PRUNED, f32::min);
             let cutoff = e_min + threshold;
 
             energies
@@ -645,7 +645,7 @@ mod tests {
         let slot = make_slot(&types, &[0.0], &[u8::MAX]);
         let c: Vec<Vec3> = (0..3).map(|i| v(i as f32, 0.0, 0.0)).collect();
         let mut confs = vec![confs_from(1, &[&c[0..1], &c[1..2], &c[2..3]])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, None, f32::INFINITY);
+        let table = prune(&[slot], &mut confs, &fixed, &ff, None, PRUNED);
         assert_eq!(table.n_candidates(0), 3);
         assert_eq!(confs[0].n_candidates(), 3);
     }
@@ -785,7 +785,7 @@ mod tests {
         let near = [v(0.0, 0.0, 0.0)];
         let far = [v(50.0, 0.0, 0.0)];
         let mut confs = vec![confs_from(1, &[&near, &far])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, None, f32::INFINITY);
+        let table = prune(&[slot], &mut confs, &fixed, &ff, None, PRUNED);
         assert_abs_diff_eq!(table.get(0, 0), -d0, epsilon = 1e-5);
         assert_abs_diff_eq!(table.get(0, 1), 0.0, epsilon = 1e-5);
     }
@@ -803,7 +803,7 @@ mod tests {
         let slot = make_slot(&types, &[qi], &[u8::MAX]);
         let coords = [v(0.0, 0.0, 0.0)];
         let mut confs = vec![confs_from(1, &[&coords])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, Some(diel), f32::INFINITY);
+        let table = prune(&[slot], &mut confs, &fixed, &ff, Some(diel), PRUNED);
         let expected = (COULOMB_CONST / diel) * qi * qj / (r * r);
         assert_abs_diff_eq!(table.get(0, 0), expected, epsilon = 1e-4);
     }
