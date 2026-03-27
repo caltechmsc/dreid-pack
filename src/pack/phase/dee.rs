@@ -11,20 +11,18 @@ pub fn dee(self_e: &mut SelfEnergyTable, pair_e: &PairEnergyTable, graph: &Conta
     let n = self_e.n_slots();
     debug_assert_eq!(graph.n_slots(), n);
 
-    let mut alive: Vec<Vec<usize>> = (0..n)
-        .map(|s| {
-            (0..self_e.n_candidates(s))
-                .filter(|&r| !self_e.is_pruned(s, r))
-                .collect()
-        })
-        .collect();
+    let mut fixed = vec![false; n];
 
     let mut total_eliminated = 0usize;
 
-    for phase in [Phase::Goldstein, Phase::Split, Phase::Goldstein] {
-        let eliminated = converge(phase, self_e, pair_e, graph, &mut alive);
-        total_eliminated += eliminated;
-        absorb(self_e, pair_e, graph, &mut alive);
+    for phase in [
+        Phase::Goldstein,
+        Phase::Split,
+        Phase::Goldstein,
+        Phase::Split,
+    ] {
+        total_eliminated += converge(phase, self_e, pair_e, graph, &fixed);
+        absorb(self_e, pair_e, graph, &mut fixed);
     }
 
     total_eliminated
@@ -43,35 +41,30 @@ fn converge(
     self_e: &mut SelfEnergyTable,
     pair_e: &PairEnergyTable,
     graph: &ContactGraph,
-    alive: &mut [Vec<usize>],
+    fixed: &[bool],
 ) -> usize {
     let n = self_e.n_slots();
     let mut total = 0usize;
 
     loop {
-        let snap: Vec<Vec<usize>> = alive.to_vec();
-
         let elims: Vec<Vec<usize>> = (0..n)
             .into_par_iter()
             .map(|i| {
-                if snap[i].len() <= 1 {
+                if fixed[i] || !has_choice(self_e, i) {
                     return Vec::new();
                 }
                 match phase {
-                    Phase::Goldstein => goldstein_slot(i, self_e, pair_e, graph, &snap),
-                    Phase::Split => split_slot(i, self_e, pair_e, graph, &snap),
+                    Phase::Goldstein => goldstein_slot(i, self_e, pair_e, graph, fixed),
+                    Phase::Split => split_slot(i, self_e, pair_e, graph, fixed),
                 }
             })
             .collect();
 
         let mut round_eliminated = 0usize;
         for (i, dead) in elims.into_iter().enumerate() {
-            for s in &dead {
-                self_e.prune(i, *s);
-            }
-            if !dead.is_empty() {
-                round_eliminated += dead.len();
-                alive[i].retain(|r| !dead.contains(r));
+            round_eliminated += dead.len();
+            for s in dead {
+                self_e.prune(i, s);
             }
         }
 
@@ -84,51 +77,75 @@ fn converge(
     total
 }
 
+/// Returns `true` if slot `s` has at least two non-pruned candidates.
+fn has_choice(self_e: &SelfEnergyTable, s: usize) -> bool {
+    let mut seen = 0u8;
+    for r in 0..self_e.n_candidates(s) {
+        if !self_e.is_pruned(s, r) {
+            seen += 1;
+            if seen >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Pair-energy lookup for `(ci_at_slot_i, cj_at_neighbor)` on `edge`.
+fn pair_val(mat: &[f32], stride: usize, is_left: bool, ci: usize, cj: usize) -> f32 {
+    if is_left {
+        mat[ci * stride + cj]
+    } else {
+        mat[cj * stride + ci]
+    }
+}
+
 /// Applies the Goldstein criterion to every surviving candidate at slot `i`.
-/// Returns the list of candidate indices that were eliminated.
 fn goldstein_slot(
     i: usize,
     self_e: &SelfEnergyTable,
     pair_e: &PairEnergyTable,
     graph: &ContactGraph,
-    alive: &[Vec<usize>],
+    fixed: &[bool],
 ) -> Vec<usize> {
-    let alive_i = &alive[i];
+    let nc = self_e.n_candidates(i);
     let mut dead = Vec::new();
 
-    for &s in alive_i {
-        if dead.contains(&s) {
+    let edges: Vec<(usize, &[f32], usize, bool)> = graph
+        .neighbor_edges(i)
+        .filter(|&(j, _, _)| !fixed[j as usize])
+        .map(|(j, e, is_left)| {
+            let e = e as usize;
+            let mat = pair_e.matrix(e);
+            let stride = pair_e.dims(e).1;
+            (j as usize, mat, stride, is_left)
+        })
+        .collect();
+
+    for s in 0..nc {
+        if self_e.is_pruned(i, s) {
             continue;
         }
 
         let es = self_e.get(i, s);
 
-        let is_eliminated = alive_i.iter().any(|&r| {
-            if r == s || dead.contains(&r) {
+        let is_dead = (0..nc).any(|r| {
+            if r == s || self_e.is_pruned(i, r) {
                 return false;
             }
 
             let mut ex = es - self_e.get(i, r);
 
-            for (j, edge, is_left) in graph.neighbor_edges(i) {
-                let j = j as usize;
-                let edge = edge as usize;
-
-                if alive[j].is_empty() {
-                    continue;
-                }
-
-                let pair_val = |cand_i: usize, cand_j: usize| {
-                    if is_left {
-                        pair_e.get(edge, cand_i, cand_j)
-                    } else {
-                        pair_e.get(edge, cand_j, cand_i)
-                    }
-                };
+            for &(j, mat, stride, is_left) in &edges {
+                let nc_j = self_e.n_candidates(j);
 
                 let mut min_diff = f32::INFINITY;
-                for &t in &alive[j] {
-                    let diff = pair_val(s, t) - pair_val(r, t);
+                for t in 0..nc_j {
+                    if self_e.is_pruned(j, t) {
+                        continue;
+                    }
+                    let diff =
+                        pair_val(mat, stride, is_left, s, t) - pair_val(mat, stride, is_left, r, t);
                     if diff < min_diff {
                         min_diff = diff;
                     }
@@ -140,7 +157,7 @@ fn goldstein_slot(
             ex > 0.0
         });
 
-        if is_eliminated {
+        if is_dead {
             dead.push(s);
         }
     }
@@ -149,84 +166,92 @@ fn goldstein_slot(
 }
 
 /// Applies the Split DEE criterion to every surviving candidate at slot `i`.
-/// Returns the list of candidate indices that were eliminated.
 fn split_slot(
     i: usize,
     self_e: &SelfEnergyTable,
     pair_e: &PairEnergyTable,
     graph: &ContactGraph,
-    alive: &[Vec<usize>],
+    fixed: &[bool],
 ) -> Vec<usize> {
-    let alive_i = &alive[i];
+    let nc = self_e.n_candidates(i);
     let mut dead = Vec::new();
 
-    let neighbors: Vec<(usize, usize, bool)> = graph
+    let neighbors: Vec<(usize, &[f32], usize, bool)> = graph
         .neighbor_edges(i)
-        .map(|(j, e, left)| (j as usize, e as usize, left))
+        .filter(|&(j, _, _)| !fixed[j as usize])
+        .map(|(j, e, is_left)| {
+            let e = e as usize;
+            let mat = pair_e.matrix(e);
+            let stride = pair_e.dims(e).1;
+            (j as usize, mat, stride, is_left)
+        })
         .collect();
 
-    for &s in alive_i {
-        if dead.contains(&s) {
+    let n_nbr = neighbors.len();
+    if n_nbr == 0 {
+        return dead;
+    }
+
+    let max_comp = nc.saturating_sub(1);
+    let mut comp_buf = Vec::with_capacity(max_comp);
+    let mut diff_self_buf = Vec::with_capacity(max_comp);
+    let mut min_pair_buf = vec![0.0f32; max_comp * n_nbr];
+    let mut sum_all_buf = Vec::with_capacity(max_comp);
+
+    for s in 0..nc {
+        if self_e.is_pruned(i, s) {
             continue;
         }
         let es = self_e.get(i, s);
 
-        let competitors: Vec<usize> = alive_i
-            .iter()
-            .copied()
-            .filter(|&r| r != s && !dead.contains(&r))
-            .collect();
-
-        if competitors.is_empty() {
+        comp_buf.clear();
+        diff_self_buf.clear();
+        for r in 0..nc {
+            if r == s || self_e.is_pruned(i, r) {
+                continue;
+            }
+            diff_self_buf.push(es - self_e.get(i, r));
+            comp_buf.push(r);
+        }
+        let n_comp = comp_buf.len();
+        if n_comp == 0 {
             continue;
         }
 
-        let diff_self: Vec<f32> = competitors.iter().map(|&r| es - self_e.get(i, r)).collect();
+        for (ci, &r) in comp_buf.iter().enumerate() {
+            for (ki, &(j, mat, stride, is_left)) in neighbors.iter().enumerate() {
+                let nc_j = self_e.n_candidates(j);
+                let mut min_v = f32::INFINITY;
+                for t in 0..nc_j {
+                    if self_e.is_pruned(j, t) {
+                        continue;
+                    }
+                    let diff =
+                        pair_val(mat, stride, is_left, s, t) - pair_val(mat, stride, is_left, r, t);
+                    if diff < min_v {
+                        min_v = diff;
+                    }
+                }
+                min_pair_buf[ci * n_nbr + ki] = min_v;
+            }
+        }
 
-        let min_pair: Vec<Vec<f32>> = competitors
-            .iter()
-            .map(|&r| {
-                neighbors
-                    .iter()
-                    .map(|&(j, edge, is_left)| {
-                        let pair_val = |ci: usize, cj: usize| {
-                            if is_left {
-                                pair_e.get(edge, ci, cj)
-                            } else {
-                                pair_e.get(edge, cj, ci)
-                            }
-                        };
-                        alive[j]
-                            .iter()
-                            .map(|&t| pair_val(s, t) - pair_val(r, t))
-                            .fold(f32::INFINITY, f32::min)
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let sum_all: Vec<f32> = (0..competitors.len())
-            .map(|ci| diff_self[ci] + min_pair[ci].iter().sum::<f32>())
-            .collect();
+        sum_all_buf.clear();
+        for ci in 0..n_comp {
+            let row = &min_pair_buf[ci * n_nbr..(ci + 1) * n_nbr];
+            sum_all_buf.push(diff_self_buf[ci] + row.iter().sum::<f32>());
+        }
 
         let mut pruned = false;
 
-        'split_k: for (ki, &(k, edge_k, is_left_k)) in neighbors.iter().enumerate() {
-            if alive[k].is_empty() {
-                continue;
-            }
+        'split_k: for (ki, &(k, mat_k, stride_k, is_left_k)) in neighbors.iter().enumerate() {
+            let nc_k = self_e.n_candidates(k);
 
-            let pair_val_k = |ci: usize, ck: usize| {
-                if is_left_k {
-                    pair_e.get(edge_k, ci, ck)
-                } else {
-                    pair_e.get(edge_k, ck, ci)
-                }
-            };
-
-            let all_vk_eliminated = alive[k].iter().all(|&vk| {
-                competitors.iter().enumerate().any(|(ci, &r)| {
-                    let ex = sum_all[ci] - min_pair[ci][ki] + pair_val_k(s, vk) - pair_val_k(r, vk);
+            let all_vk_eliminated = (0..nc_k).filter(|&vk| !self_e.is_pruned(k, vk)).all(|vk| {
+                (0..n_comp).any(|ci| {
+                    let ex = sum_all_buf[ci] - min_pair_buf[ci * n_nbr + ki]
+                        + pair_val(mat_k, stride_k, is_left_k, s, vk)
+                        - pair_val(mat_k, stride_k, is_left_k, comp_buf[ci], vk);
                     ex > 0.0
                 })
             });
@@ -251,49 +276,57 @@ fn absorb(
     self_e: &mut SelfEnergyTable,
     pair_e: &PairEnergyTable,
     graph: &ContactGraph,
-    alive: &mut [Vec<usize>],
+    fixed: &mut [bool],
 ) {
     let n = self_e.n_slots();
 
-    let fixed: Vec<(usize, usize)> = (0..n)
+    let newly_fixed: Vec<(usize, usize)> = (0..n)
         .filter_map(|s| {
-            if alive[s].len() == 1 {
-                Some((s, alive[s][0]))
-            } else {
-                None
+            if fixed[s] {
+                return None;
             }
+            let mut sole = None;
+            for r in 0..self_e.n_candidates(s) {
+                if !self_e.is_pruned(s, r) {
+                    if sole.is_some() {
+                        return None; // more than one survivor
+                    }
+                    sole = Some(r);
+                }
+            }
+            sole.map(|r| (s, r))
         })
         .collect();
 
-    if fixed.is_empty() {
+    if newly_fixed.is_empty() {
         return;
     }
 
-    for &(fi, best_rot) in &fixed {
+    for &(fi, best_rot) in &newly_fixed {
         for (j, edge, is_left) in graph.neighbor_edges(fi) {
             let j = j as usize;
-            let edge = edge as usize;
-
-            if alive[j].len() <= 1 {
+            if fixed[j] {
                 continue;
             }
+            let edge = edge as usize;
+            let mat = pair_e.matrix(edge);
+            let stride = pair_e.dims(edge).1;
 
-            for &rj in &alive[j] {
-                let pair_val = if is_left {
-                    pair_e.get(edge, best_rot, rj)
-                } else {
-                    pair_e.get(edge, rj, best_rot)
-                };
-
-                if pair_val != 0.0 {
+            let nc_j = self_e.n_candidates(j);
+            for rj in 0..nc_j {
+                if self_e.is_pruned(j, rj) {
+                    continue;
+                }
+                let pv = pair_val(mat, stride, is_left, best_rot, rj);
+                if pv != 0.0 {
                     let v = self_e.get(j, rj);
-                    self_e.set(j, rj, v + pair_val);
+                    self_e.set(j, rj, v + pv);
                 }
             }
         }
     }
 
-    for &(fi, _) in &fixed {
-        alive[fi].clear();
+    for &(fi, _) in &newly_fixed {
+        fixed[fi] = true;
     }
 }
