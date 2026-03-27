@@ -3,6 +3,7 @@ use crate::pack::model::{
     graph::ContactGraph,
 };
 use rayon::prelude::*;
+use std::cmp::Reverse;
 
 /// Pair-energy significance threshold (kcal/mol). Edges where every surviving
 /// candidate pair has `|pair_e| ≤ PAIR_CUT` are dropped from the work graph.
@@ -229,9 +230,7 @@ fn solve_component(
     let mut threshold = EDGE_DECOMP_THRESHOLD_INIT;
 
     loop {
-        let (bags, treewidth) = eliminate(cn, &adj);
-
-        if treewidth <= TREEWIDTH_CUT {
+        if let Some((bags, _)) = eliminate(cn, &adj, TREEWIDTH_CUT) {
             let tree = root_tree(&bags);
             tree_dp(
                 &tree,
@@ -376,68 +375,182 @@ fn edge_decompose(
     }
 }
 
+/// Maximum Cardinality Search. Produces a PEO when the graph is chordal.
+fn mcs_order(matrix: &[bool], n: usize) -> Vec<usize> {
+    let mut numbered = vec![false; n];
+    let mut card = vec![0u32; n];
+    let mut sigma = vec![0usize; n];
+
+    for i in (1..=n).rev() {
+        let v = (0..n)
+            .filter(|&v| !numbered[v])
+            .min_by_key(|&v| (Reverse(card[v]), v))
+            .unwrap();
+        sigma[v] = i;
+        numbered[v] = true;
+        for u in 0..n {
+            if !numbered[u] && matrix[v * n + u] {
+                card[u] += 1;
+            }
+        }
+    }
+
+    let mut order = vec![0usize; n];
+    for v in 0..n {
+        order[sigma[v] - 1] = v;
+    }
+    order
+}
+
+/// Returns `true` if `order` is a Perfect Elimination Ordering: for each
+/// vertex, its first later neighbor is adjacent to all other later neighbors.
+fn is_peo(matrix: &[bool], n: usize, order: &[usize]) -> bool {
+    let mut pos = vec![0usize; n];
+    for (i, &v) in order.iter().enumerate() {
+        pos[v] = i;
+    }
+
+    for (i, &v) in order.iter().enumerate() {
+        let mut f = usize::MAX;
+        let mut f_pos = usize::MAX;
+        for u in 0..n {
+            if matrix[v * n + u] && pos[u] > i && pos[u] < f_pos {
+                f_pos = pos[u];
+                f = u;
+            }
+        }
+        if f == usize::MAX {
+            continue;
+        }
+        for u in 0..n {
+            if u != f && matrix[v * n + u] && pos[u] > i && !matrix[f * n + u] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// A bag produced by the elimination ordering.
 struct Bag {
     elim: u32,
     sep: Vec<u32>,
 }
 
-/// Builds elimination ordering via minimum-degree heuristic with fill-in.
-/// Returns `(bags, treewidth)`.
-fn eliminate(n: usize, adj: &[Vec<u32>]) -> (Vec<Bag>, usize) {
-    let mut work: Vec<Vec<u32>> = adj.to_vec();
-    let mut eliminated = vec![false; n];
-    let mut bags = Vec::with_capacity(n);
-    let mut treewidth = 0usize;
+/// Builds elimination bags using the best available heuristic (MCS for chordal, min-fill otherwise).
+fn eliminate(n: usize, adj: &[Vec<u32>], max_width: usize) -> Option<(Vec<Bag>, usize)> {
+    if n == 0 {
+        return Some((Vec::new(), 0));
+    }
 
-    for _ in 0..n {
-        let v = (0..n)
-            .filter(|&u| !eliminated[u] && !work[u].is_empty())
-            .min_by_key(|&u| work[u].len());
-
-        let v = match v {
-            Some(v) => v,
-            None => {
-                for (u, elim) in eliminated.iter_mut().enumerate() {
-                    if !*elim {
-                        bags.push(Bag {
-                            elim: u as u32,
-                            sep: Vec::new(),
-                        });
-                        *elim = true;
-                    }
-                }
-                break;
-            }
-        };
-
-        let sep: Vec<u32> = work[v].clone();
-        if sep.len() > treewidth {
-            treewidth = sep.len();
-        }
-
-        bags.push(Bag {
-            elim: v as u32,
-            sep: sep.clone(),
-        });
-        eliminated[v] = true;
-
-        for &u in &sep {
-            work[u as usize].retain(|&x| x != v as u32);
-        }
-
-        for i in 0..sep.len() {
-            for j in (i + 1)..sep.len() {
-                let (a, b) = (sep[i], sep[j]);
-                if !work[a as usize].contains(&b) {
-                    work[a as usize].push(b);
-                    work[b as usize].push(a);
-                }
-            }
+    let mut matrix = vec![false; n * n];
+    for (v, nbrs) in adj.iter().enumerate() {
+        for &u in nbrs {
+            matrix[v * n + u as usize] = true;
         }
     }
 
-    (bags, treewidth)
+    let mcs = mcs_order(&matrix, n);
+    if is_peo(&matrix, n, &mcs) {
+        return build_bags(&mut matrix, n, &mcs, max_width);
+    }
+
+    build_bags_min_fill(&mut matrix, n, max_width)
+}
+
+/// Builds bags following a predetermined elimination ordering.
+fn build_bags(
+    matrix: &mut [bool],
+    n: usize,
+    order: &[usize],
+    max_width: usize,
+) -> Option<(Vec<Bag>, usize)> {
+    let mut eliminated = vec![false; n];
+    let mut bags = Vec::with_capacity(n);
+    let mut width = 0;
+
+    for &v in order {
+        let sep = collect_sep(matrix, n, v, &eliminated);
+        if sep.len() > max_width {
+            return None;
+        }
+        width = width.max(sep.len());
+        apply_fill_in(matrix, n, &sep);
+        eliminated[v] = true;
+        bags.push(Bag {
+            elim: v as u32,
+            sep,
+        });
+    }
+
+    Some((bags, width))
+}
+
+/// Builds bags with dynamic min-fill vertex selection (single pass).
+fn build_bags_min_fill(
+    matrix: &mut [bool],
+    n: usize,
+    max_width: usize,
+) -> Option<(Vec<Bag>, usize)> {
+    let mut eliminated = vec![false; n];
+    let mut bags = Vec::with_capacity(n);
+    let mut width = 0;
+
+    for _ in 0..n {
+        let v = (0..n)
+            .filter(|&v| !eliminated[v])
+            .min_by_key(|&v| {
+                let mut fill = 0u32;
+                for a in 0..n {
+                    if a == v || eliminated[a] || !matrix[v * n + a] {
+                        continue;
+                    }
+                    for b in (a + 1)..n {
+                        if b == v || eliminated[b] || !matrix[v * n + b] {
+                            continue;
+                        }
+                        if !matrix[a * n + b] {
+                            fill += 1;
+                        }
+                    }
+                }
+                (fill, v)
+            })
+            .unwrap();
+
+        let sep = collect_sep(matrix, n, v, &eliminated);
+        if sep.len() > max_width {
+            return None;
+        }
+        width = width.max(sep.len());
+        apply_fill_in(matrix, n, &sep);
+        eliminated[v] = true;
+        bags.push(Bag {
+            elim: v as u32,
+            sep,
+        });
+    }
+
+    Some((bags, width))
+}
+
+/// Ascending alive neighbours of `v` (separator at elimination time).
+fn collect_sep(matrix: &[bool], n: usize, v: usize, eliminated: &[bool]) -> Vec<u32> {
+    (0..n)
+        .filter(|&u| u != v && !eliminated[u] && matrix[v * n + u])
+        .map(|u| u as u32)
+        .collect()
+}
+
+/// Makes `sep` vertices pairwise adjacent (clique fill-in).
+fn apply_fill_in(matrix: &mut [bool], n: usize, sep: &[u32]) {
+    for i in 0..sep.len() {
+        for j in (i + 1)..sep.len() {
+            let (a, b) = (sep[i] as usize, sep[j] as usize);
+            matrix[a * n + b] = true;
+            matrix[b * n + a] = true;
+        }
+    }
 }
 
 /// A node in the rooted elimination tree.
@@ -455,6 +568,12 @@ fn root_tree(bags: &[Bag]) -> Vec<TreeNode> {
         return Vec::new();
     }
 
+    let max_v = bags.iter().map(|b| b.elim as usize).max().unwrap_or(0) + 1;
+    let mut vertex_bag = vec![0u32; max_v];
+    for (i, bag) in bags.iter().enumerate() {
+        vertex_bag[bag.elim as usize] = i as u32;
+    }
+
     let mut nodes: Vec<TreeNode> = bags
         .iter()
         .rev()
@@ -465,50 +584,19 @@ fn root_tree(bags: &[Bag]) -> Vec<TreeNode> {
         })
         .collect();
 
-    let mut on_tree: Vec<Vec<u32>> = Vec::with_capacity(n);
-    on_tree.push({
-        let mut t = nodes[0].sep.clone();
-        t.push(nodes[0].elim);
-        t.sort_unstable();
-        t
-    });
-
-    for ni in 1..n {
-        let sep = nodes[ni].sep.clone();
-
-        let parent = on_tree
+    for (elim_i, bag) in bags.iter().enumerate().take(n - 1) {
+        let parent_elim_i = bag
+            .sep
             .iter()
-            .enumerate()
-            .take(ni)
-            .find(|(_, ts)| is_subset(&sep, ts))
-            .map_or(0u32, |(pi, _)| pi as u32);
-
-        nodes[parent as usize].children.push(ni as u32);
-
-        let mut t = sep;
-        t.push(nodes[ni].elim);
-        t.sort_unstable();
-        on_tree.push(t);
+            .map(|&v| vertex_bag[v as usize] as usize)
+            .min()
+            .unwrap_or(n - 1);
+        let child_rev = n - 1 - elim_i;
+        let parent_rev = n - 1 - parent_elim_i;
+        nodes[parent_rev].children.push(child_rev as u32);
     }
 
     nodes
-}
-
-/// Returns `true` if every element of `sub` appears in `sorted_super`.
-fn is_subset(sub: &[u32], sorted_super: &[u32]) -> bool {
-    let mut sorted_sub = sub.to_vec();
-    sorted_sub.sort_unstable();
-    let mut j = 0;
-    for &val in &sorted_sub {
-        while j < sorted_super.len() && sorted_super[j] < val {
-            j += 1;
-        }
-        if j >= sorted_super.len() || sorted_super[j] != val {
-            return false;
-        }
-        j += 1;
-    }
-    true
 }
 
 /// Runs the full tree-decomposition DP and writes the GMEC into `result`.
@@ -542,7 +630,7 @@ fn tree_dp(
 
     let nodes: Vec<NodeInfo> = tree
         .iter()
-        .map(|tn| NodeInfo::new(tn, &alive_data, &alive_off))
+        .map(|tn| NodeInfo::new(tn, &alive_off))
         .collect();
 
     let node_edges: Vec<Vec<EdgeInfo>> = nodes
@@ -732,7 +820,7 @@ struct NodeInfo {
 }
 
 impl NodeInfo {
-    fn new(tn: &TreeNode, _alive_data: &[usize], alive_off: &[usize]) -> Self {
+    fn new(tn: &TreeNode, alive_off: &[usize]) -> Self {
         let sep_cis: Vec<usize> = tn.sep.iter().map(|&v| v as usize).collect();
         let sep_dims: Vec<usize> = sep_cis
             .iter()
