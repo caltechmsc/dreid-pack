@@ -1098,9 +1098,7 @@ fn dihedral(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> f32 {
     let b3 = d - c;
     let n1 = b1.cross(b2);
     let n2 = b2.cross(b3);
-    let x = n1.dot(n2) * b2.len();
-    let y = n1.cross(b2).dot(n2);
-    y.atan2(x)
+    (b2.len() * b1.dot(n2)).atan2(n1.dot(n2))
 }
 
 fn to_vec3(p: [f64; 3]) -> Vec3 {
@@ -2108,7 +2106,7 @@ mod tests {
             [0.0, 1.0, 0.0],
             [0.0, 1.0, 1.0],
         );
-        assert_abs_diff_eq!(angle, std::f32::consts::FRAC_PI_2, epsilon = 1e-6);
+        assert_abs_diff_eq!(angle, -std::f32::consts::FRAC_PI_2, epsilon = 1e-6);
     }
 
     #[test]
