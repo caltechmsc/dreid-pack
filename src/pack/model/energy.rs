@@ -133,6 +133,43 @@ impl PairEnergyTable {
     }
 }
 
+/// Per-candidate rotamer preference energies for every slot.
+pub struct RotamerBias {
+    data: Vec<f32>,
+    offsets: Vec<usize>,
+}
+
+impl RotamerBias {
+    /// Consolidates per-slot bias vectors into flat storage.
+    pub fn new(per_slot: Vec<Vec<f32>>) -> Self {
+        let n = per_slot.len();
+        let mut offsets = vec![0usize; n + 1];
+        for (i, v) in per_slot.iter().enumerate() {
+            offsets[i + 1] = offsets[i] + v.len();
+        }
+        let mut data = Vec::with_capacity(offsets[n]);
+        for v in per_slot {
+            data.extend(v);
+        }
+        Self { data, offsets }
+    }
+
+    /// Number of slots.
+    pub fn n_slots(&self) -> usize {
+        self.offsets.len() - 1
+    }
+
+    /// Bias energies for slot `s`.
+    pub fn slot(&self, s: usize) -> &[f32] {
+        debug_assert!(
+            s < self.n_slots(),
+            "slot {s} out of bounds (n_slots = {})",
+            self.n_slots(),
+        );
+        &self.data[self.offsets[s]..self.offsets[s + 1]]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +337,38 @@ mod tests {
     fn pair_set_panics_rj_out_of_bounds() {
         let mut t = PairEnergyTable::new(&[(2, 3)]);
         t.set(0, 0, 3, 0.0);
+    }
+
+    #[test]
+    fn bias_empty_has_zero_slots() {
+        let b = RotamerBias::new(vec![]);
+        assert_eq!(b.n_slots(), 0);
+    }
+
+    #[test]
+    fn bias_n_slots_matches() {
+        let b = RotamerBias::new(vec![vec![1.0, 2.0], vec![3.0]]);
+        assert_eq!(b.n_slots(), 2);
+    }
+
+    #[test]
+    fn bias_slot_returns_correct_slice() {
+        let b = RotamerBias::new(vec![vec![1.0, 2.0], vec![3.0, 4.0, 5.0]]);
+        assert_eq!(b.slot(0), [1.0, 2.0]);
+        assert_eq!(b.slot(1), [3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn bias_data_is_flat() {
+        let b = RotamerBias::new(vec![vec![1.0], vec![2.0, 3.0]]);
+        assert_eq!(b.data.len(), 3);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    fn bias_slot_panics_out_of_bounds() {
+        let b = RotamerBias::new(vec![vec![1.0]]);
+        let _ = b.slot(1);
     }
 }

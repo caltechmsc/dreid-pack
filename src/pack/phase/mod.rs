@@ -21,7 +21,7 @@ pub fn pack(system: &mut System, config: &PackConfig) {
 
     // Phases 1, 2 & 3-pre: conformer sampling, contact-graph construction, and
     // fixed-atom spatial index are all mutually independent — run in parallel.
-    let ((mut conformations, contact_graph), fixed) = rayon::join(
+    let (((mut conformations, bias), contact_graph), fixed) = rayon::join(
         || {
             rayon::join(
                 || {
@@ -38,14 +38,15 @@ pub fn pack(system: &mut System, config: &PackConfig) {
         || FixedAtoms::build(&system.fixed, cutoff),
     );
 
-    // Phase 3: self-energies (SC <-> fixed) and in-place compaction of provably
-    // dead conformers.
+    // Phase 3: self-energies (SC <-> fixed + rotamer preference) and in-place
+    // compaction of provably dead conformers.
     let mut self_e = prune::prune(
         &system.mobile,
         &mut conformations,
         &fixed,
         &system.ff,
         config.electrostatics,
+        &bias,
         config.self_energy_threshold,
     );
 

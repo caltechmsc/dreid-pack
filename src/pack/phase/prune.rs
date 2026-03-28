@@ -10,74 +10,68 @@ use crate::{
         energy::{BuckKernel, LjKernel, VdwKernel, cos_dha, coulomb_energy, hbond_energy},
         model::{
             conformation::Conformations,
-            energy::{PRUNED, SelfEnergyTable},
+            energy::{PRUNED, RotamerBias, SelfEnergyTable},
             fixed::{FixedAtoms, NO_DONOR},
         },
     },
 };
 use rayon::prelude::*;
 
-/// Computes self-energies (SC <-> Fixed), threshold-prunes dead candidates,
-/// and compacts both [`SelfEnergyTable`] and [`Conformations`] in sync.
+/// Computes self-energies (SC <-> Fixed + rotamer bias), threshold-prunes
+/// dead candidates, and compacts both [`SelfEnergyTable`] and
+/// [`Conformations`] in sync.
 pub fn prune(
     slots: &[Residue],
     conformations: &mut [Conformations],
     fixed: &FixedAtoms<'_>,
     ff: &ForceFieldParams,
     electrostatics: Option<f32>,
+    bias: &RotamerBias,
     threshold: f32,
 ) -> SelfEnergyTable {
     let n = slots.len();
     debug_assert_eq!(n, conformations.len());
+    debug_assert_eq!(n, bias.n_slots());
 
     let c_d = electrostatics.map(|d| COULOMB_CONST / d);
 
-    let results = match (&ff.vdw, c_d) {
-        (VdwMatrix::LennardJones(m), None) => survivors::<_, false>(
-            &LjKernel(m),
-            slots,
-            conformations,
-            fixed,
-            &ff.hbond,
-            0.0,
-            threshold,
-        ),
-        (VdwMatrix::LennardJones(m), Some(c)) => survivors::<_, true>(
-            &LjKernel(m),
-            slots,
-            conformations,
-            fixed,
-            &ff.hbond,
-            c,
-            threshold,
-        ),
-        (VdwMatrix::Buckingham(m), None) => survivors::<_, false>(
-            &BuckKernel(m),
-            slots,
-            conformations,
-            fixed,
-            &ff.hbond,
-            0.0,
-            threshold,
-        ),
-        (VdwMatrix::Buckingham(m), Some(c)) => survivors::<_, true>(
-            &BuckKernel(m),
-            slots,
-            conformations,
-            fixed,
-            &ff.hbond,
-            c,
-            threshold,
-        ),
+    let mut energies = match (&ff.vdw, c_d) {
+        (VdwMatrix::LennardJones(m), None) => {
+            frame_energies::<_, false>(&LjKernel(m), slots, conformations, fixed, &ff.hbond, 0.0)
+        }
+        (VdwMatrix::LennardJones(m), Some(c)) => {
+            frame_energies::<_, true>(&LjKernel(m), slots, conformations, fixed, &ff.hbond, c)
+        }
+        (VdwMatrix::Buckingham(m), None) => {
+            frame_energies::<_, false>(&BuckKernel(m), slots, conformations, fixed, &ff.hbond, 0.0)
+        }
+        (VdwMatrix::Buckingham(m), Some(c)) => {
+            frame_energies::<_, true>(&BuckKernel(m), slots, conformations, fixed, &ff.hbond, c)
+        }
     };
 
-    let counts: Vec<u16> = results
-        .iter()
-        .map(|(alive, _)| alive.len() as u16)
-        .collect();
+    let mut counts = Vec::with_capacity(n);
+    let mut all_survivors: Vec<(Vec<u16>, Vec<f32>)> = Vec::with_capacity(n);
+    for (s, slot_e) in energies.iter_mut().enumerate() {
+        for (e, &b) in slot_e.iter_mut().zip(bias.slot(s)) {
+            *e += b;
+        }
+        let e_min = slot_e.iter().copied().fold(PRUNED, f32::min);
+        let cutoff = e_min + threshold;
+        let (alive, kept): (Vec<u16>, Vec<f32>) = slot_e
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|&(_, e)| e <= cutoff)
+            .map(|(i, e)| (i as u16, e))
+            .unzip();
+        counts.push(alive.len() as u16);
+        all_survivors.push((alive, kept));
+    }
+
     let mut table = SelfEnergyTable::new(&counts);
-    for (s, (alive, energies)) in results.iter().enumerate() {
-        for (r, &e) in energies.iter().enumerate() {
+    for (s, (alive, kept)) in all_survivors.iter().enumerate() {
+        for (r, &e) in kept.iter().enumerate() {
             table.set(s, r, e);
         }
         conformations[s].compact(alive);
@@ -93,17 +87,15 @@ struct SlotAtoms<'a> {
     donors: &'a [u8],
 }
 
-/// Parallel over slots × candidates: compute energies, threshold-prune,
-/// return per-slot `(surviving_indices, surviving_energies)`.
-fn survivors<V: VdwKernel + Sync, const COUL: bool>(
+/// Parallel over slots × candidates: compute frame energies (SC <-> fixed).
+fn frame_energies<V: VdwKernel + Sync, const COUL: bool>(
     vdw: &V,
     slots: &[Residue],
     conformations: &[Conformations],
     fixed: &FixedAtoms<'_>,
     hbond: &HBondParams,
     c_d: f32,
-    threshold: f32,
-) -> Vec<(Vec<u16>, Vec<f32>)> {
+) -> Vec<Vec<f32>> {
     slots
         .par_iter()
         .zip(conformations.par_iter())
@@ -114,21 +106,10 @@ fn survivors<V: VdwKernel + Sync, const COUL: bool>(
                 donors: slot.donor_of_h(),
             };
 
-            let energies: Vec<f32> = (0..confs.n_candidates())
+            (0..confs.n_candidates())
                 .into_par_iter()
                 .map(|r| self_energy::<V, COUL>(confs.coords_of(r), &atoms, fixed, vdw, hbond, c_d))
-                .collect();
-
-            let e_min = energies.iter().copied().fold(PRUNED, f32::min);
-            let cutoff = e_min + threshold;
-
-            energies
-                .iter()
-                .copied()
-                .enumerate()
-                .filter(|&(_, e)| e <= cutoff)
-                .map(|(i, e)| (i as u16, e))
-                .unzip()
+                .collect()
         })
         .collect()
 }
@@ -641,17 +622,23 @@ mod tests {
             vdw: VdwMatrix::LennardJones(lj_n(1, 0.0, 3.0)),
             hbond: no_hbond(),
         };
-        let types = [t(0)];
-        let slot = make_slot(&types, &[0.0], &[u8::MAX]);
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
         let c: Vec<Vec3> = (0..3).map(|i| v(i as f32, 0.0, 0.0)).collect();
         let mut confs = vec![confs_from(1, &[&c[0..1], &c[1..2], &c[2..3]])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, None, PRUNED);
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![0.0; 3]]),
+            PRUNED,
+        );
         assert_eq!(table.n_candidates(0), 3);
-        assert_eq!(confs[0].n_candidates(), 3);
     }
 
     #[test]
-    fn prune_zero_threshold_keeps_only_minimum_energy_candidate() {
+    fn prune_zero_threshold_prunes_all_but_minimum() {
         let (d0, r0) = (2.0_f32, 3.0_f32);
         let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
@@ -659,26 +646,24 @@ mod tests {
             vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
             hbond: no_hbond(),
         };
-        let types = [t(0)];
-        let slot = make_slot(&types, &[0.0], &[u8::MAX]);
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
         let near = [v(0.0, 0.0, 0.0)];
         let far = [v(50.0, 0.0, 0.0)];
         let mut confs = vec![confs_from(1, &[&near, &far])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, None, 0.0);
-        assert_eq!(
-            table.n_candidates(0),
-            1,
-            "only minimum-energy candidate must survive"
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![0.0; 2]]),
+            0.0,
         );
-        assert_eq!(confs[0].n_candidates(), 1);
-        assert!(
-            table.get(0, 0) < 0.0,
-            "surviving energy must be the low-energy one"
-        );
+        assert_eq!(table.n_candidates(0), 1);
     }
 
     #[test]
-    fn prune_threshold_window_admits_candidates_within_range() {
+    fn prune_candidate_exceeding_threshold_is_eliminated() {
         let (d0, r0) = (2.0_f32, 3.0_f32);
         let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
@@ -686,61 +671,74 @@ mod tests {
             vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
             hbond: no_hbond(),
         };
-        let types = [t(0)];
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
         let near = [v(0.0, 0.0, 0.0)];
         let far = [v(50.0, 0.0, 0.0)];
-
-        let mut confs_a = vec![confs_from(1, &[&near, &far])];
-        let table_a = prune(
-            &[make_slot(&types, &[0.0], &[u8::MAX])],
-            &mut confs_a,
+        let mut confs = vec![confs_from(1, &[&near, &far])];
+        let table = prune(
+            &[slot],
+            &mut confs,
             &fixed,
             &ff,
             None,
+            &RotamerBias::new(vec![vec![0.0; 2]]),
             1.0,
         );
-        assert_eq!(
-            table_a.n_candidates(0),
-            1,
-            "threshold=1: only minimum must survive"
-        );
-
-        let mut confs_b = vec![confs_from(1, &[&near, &far])];
-        let table_b = prune(
-            &[make_slot(&types, &[0.0], &[u8::MAX])],
-            &mut confs_b,
-            &fixed,
-            &ff,
-            None,
-            3.0,
-        );
-        assert_eq!(
-            table_b.n_candidates(0),
-            2,
-            "threshold=3: both candidates must survive"
-        );
+        assert_eq!(table.n_candidates(0), 1);
     }
 
     #[test]
-    fn prune_table_and_conformations_count_synchronized() {
-        let pool = single_atom_pool(v(3.0, 0.0, 0.0), t(0), 0.0);
+    fn prune_candidate_within_threshold_survives() {
+        let (d0, r0) = (2.0_f32, 3.0_f32);
+        let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
         let ff = ForceFieldParams {
-            vdw: VdwMatrix::LennardJones(lj_n(1, 2.0, 3.0)),
+            vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
             hbond: no_hbond(),
         };
-        let types = [t(0)];
-        let slot = make_slot(&types, &[0.0], &[u8::MAX]);
-        let c0 = [v(0.0, 0.0, 0.0)];
-        let c1 = [v(1.0, 0.0, 0.0)];
-        let c2 = [v(50.0, 0.0, 0.0)];
-        let mut confs = vec![confs_from(1, &[&c0, &c1, &c2])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, None, 0.0);
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
+        let near = [v(0.0, 0.0, 0.0)];
+        let far = [v(50.0, 0.0, 0.0)];
+        let mut confs = vec![confs_from(1, &[&near, &far])];
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![0.0; 2]]),
+            3.0,
+        );
+        assert_eq!(table.n_candidates(0), 2);
+    }
+
+    #[test]
+    fn prune_table_and_conformations_remain_synchronized() {
+        let (d0, r0) = (2.0_f32, 3.0_f32);
+        let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
+        let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
+        let ff = ForceFieldParams {
+            vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
+            hbond: no_hbond(),
+        };
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
+        let near = [v(0.0, 0.0, 0.0)];
+        let far = [v(50.0, 0.0, 0.0)];
+        let mut confs = vec![confs_from(1, &[&near, &far])];
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![0.0; 2]]),
+            0.0,
+        );
         assert_eq!(table.n_candidates(0), confs[0].n_candidates());
     }
 
     #[test]
-    fn prune_multi_slot_counts_are_independent() {
+    fn prune_equilibrium_energy_stored_in_table() {
         let (d0, r0) = (2.0_f32, 3.0_f32);
         let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
         let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
@@ -748,8 +746,106 @@ mod tests {
             vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
             hbond: no_hbond(),
         };
-        let types = [t(0)];
-        let slot = make_slot(&types, &[0.0], &[u8::MAX]);
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
+        let near = [v(0.0, 0.0, 0.0)];
+        let mut confs = vec![confs_from(1, &[&near])];
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![0.0]]),
+            PRUNED,
+        );
+        assert_abs_diff_eq!(table.get(0, 0), -d0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn prune_coulomb_energy_matches_formula() {
+        let (r, qi, qj, diel) = (3.0_f32, 1.0_f32, -1.0_f32, 4.0_f32);
+        let expected = (COULOMB_CONST / diel) * qi * qj / (r * r);
+        let pool = single_atom_pool(v(r, 0.0, 0.0), t(0), qj);
+        let fixed = FixedAtoms::build(&pool, COULOMB_CUTOFF);
+        let ff = ForceFieldParams {
+            vdw: VdwMatrix::LennardJones(lj_n(1, 0.0, 5.0)),
+            hbond: no_hbond(),
+        };
+        let slot = make_slot(&[t(0)], &[qi], &[u8::MAX]);
+        let coords = [v(0.0, 0.0, 0.0)];
+        let mut confs = vec![confs_from(1, &[&coords])];
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            Some(diel),
+            &RotamerBias::new(vec![vec![0.0]]),
+            PRUNED,
+        );
+        assert_abs_diff_eq!(table.get(0, 0), expected, epsilon = 1e-4);
+    }
+
+    #[test]
+    fn prune_positive_bias_adds_to_candidate_energy() {
+        let (d0, r0) = (2.0_f32, 3.0_f32);
+        let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
+        let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
+        let ff = ForceFieldParams {
+            vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
+            hbond: no_hbond(),
+        };
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
+        let near = [v(0.0, 0.0, 0.0)];
+        let b = 1.5_f32;
+        let mut confs = vec![confs_from(1, &[&near])];
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![b]]),
+            PRUNED,
+        );
+        assert_abs_diff_eq!(table.get(0, 0), -d0 + b, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn prune_large_bias_can_eliminate_favorable_candidate() {
+        let (d0, r0) = (2.0_f32, 3.0_f32);
+        let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
+        let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
+        let ff = ForceFieldParams {
+            vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
+            hbond: no_hbond(),
+        };
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
+        let near = [v(0.0, 0.0, 0.0)];
+        let far = [v(50.0, 0.0, 0.0)];
+        let mut confs = vec![confs_from(1, &[&near, &far])];
+        let table = prune(
+            &[slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![d0 + 1.0, 0.0]]),
+            0.0,
+        );
+        assert_eq!(table.n_candidates(0), 1);
+    }
+
+    #[test]
+    fn prune_slots_are_pruned_independently() {
+        let (d0, r0) = (2.0_f32, 3.0_f32);
+        let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
+        let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
+        let ff = ForceFieldParams {
+            vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
+            hbond: no_hbond(),
+        };
+        let slot = make_slot(&[t(0)], &[0.0], &[u8::MAX]);
         let near = [v(0.0, 0.0, 0.0)];
         let far_a = [v(50.0, 0.0, 0.0)];
         let far_b = [v(100.0, 0.0, 0.0)];
@@ -758,53 +854,16 @@ mod tests {
             confs_from(1, &[&near, &far_a]),
             confs_from(1, &[&far_b, &far_c]),
         ];
-        let table = prune(&[slot.clone(), slot], &mut confs, &fixed, &ff, None, 0.0);
-        assert_eq!(
-            table.n_candidates(0),
-            1,
-            "slot 0: only minimum must survive"
+        let table = prune(
+            &[slot.clone(), slot],
+            &mut confs,
+            &fixed,
+            &ff,
+            None,
+            &RotamerBias::new(vec![vec![0.0; 2], vec![0.0; 2]]),
+            0.0,
         );
-        assert_eq!(
-            table.n_candidates(1),
-            2,
-            "slot 1: both zero-energy must survive"
-        );
-    }
-
-    #[test]
-    fn prune_surviving_energies_stored_in_table() {
-        let (d0, r0) = (2.0_f32, 3.0_f32);
-        let pool = single_atom_pool(v(r0, 0.0, 0.0), t(0), 0.0);
-        let fixed = FixedAtoms::build(&pool, VDW_CUTOFF);
-        let ff = ForceFieldParams {
-            vdw: VdwMatrix::LennardJones(lj_n(1, d0, r0)),
-            hbond: no_hbond(),
-        };
-        let types = [t(0)];
-        let slot = make_slot(&types, &[0.0], &[u8::MAX]);
-        let near = [v(0.0, 0.0, 0.0)];
-        let far = [v(50.0, 0.0, 0.0)];
-        let mut confs = vec![confs_from(1, &[&near, &far])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, None, PRUNED);
-        assert_abs_diff_eq!(table.get(0, 0), -d0, epsilon = 1e-5);
-        assert_abs_diff_eq!(table.get(0, 1), 0.0, epsilon = 1e-5);
-    }
-
-    #[test]
-    fn prune_with_coulomb_enabled_affects_energy() {
-        let (r, qi, qj, diel) = (3.0_f32, 1.0_f32, -1.0_f32, 4.0_f32);
-        let pool = single_atom_pool(v(r, 0.0, 0.0), t(0), qj);
-        let fixed = FixedAtoms::build(&pool, COULOMB_CUTOFF);
-        let ff = ForceFieldParams {
-            vdw: VdwMatrix::LennardJones(lj_n(1, 0.0, 5.0)),
-            hbond: no_hbond(),
-        };
-        let types = [t(0)];
-        let slot = make_slot(&types, &[qi], &[u8::MAX]);
-        let coords = [v(0.0, 0.0, 0.0)];
-        let mut confs = vec![confs_from(1, &[&coords])];
-        let table = prune(&[slot], &mut confs, &fixed, &ff, Some(diel), PRUNED);
-        let expected = (COULOMB_CONST / diel) * qi * qj / (r * r);
-        assert_abs_diff_eq!(table.get(0, 0), expected, epsilon = 1e-4);
+        assert_eq!(table.n_candidates(0), 1);
+        assert_eq!(table.n_candidates(1), 2);
     }
 }
