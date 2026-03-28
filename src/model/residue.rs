@@ -94,9 +94,22 @@ impl ResidueType {
         }
     }
 
-    /// Whether this residue participates in rotamer packing (`n_chi > 0`).
+    /// Whether this residue participates in rotamer packing.
     pub const fn is_packable(self) -> bool {
-        self.n_chi() > 0
+        !matches!(self, Self::Gly | Self::Ala | Self::Cyx) // TODO: To support disulfide optimization, replace this with `self.n_chi() > 0`.
+    }
+
+    /// Symmetry period of the polar-hydrogen torsion (radians).
+    ///
+    /// Returns `0.0` for types with no rotatable polar hydrogen.
+    pub const fn polar_h_period(self) -> f32 {
+        use core::f32::consts::{PI, TAU};
+        match self {
+            Self::Lys => TAU / 3.0,
+            Self::Tyr => PI,
+            Self::Ser | Self::Thr | Self::Cys | Self::Ash | Self::Glh | Self::Lyn => TAU,
+            _ => 0.0,
+        }
     }
 
     /// Conservative upper bound on sidechain radius (Å, from Cα).
@@ -141,5 +154,21 @@ mod tests {
         assert!(!ResidueType::Gly.is_packable());
         assert!(!ResidueType::Ala.is_packable());
         assert!(ResidueType::Ser.is_packable());
+    }
+
+    #[test]
+    fn polar_h_period_values() {
+        use std::f32::consts::{PI, TAU};
+
+        assert_eq!(ResidueType::Ser.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Thr.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Cys.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Ash.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Glh.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Lyn.polar_h_period(), TAU);
+        assert_eq!(ResidueType::Tyr.polar_h_period(), PI);
+        assert_eq!(ResidueType::Lys.polar_h_period(), TAU / 3.0);
+        assert_eq!(ResidueType::Val.polar_h_period(), 0.0);
+        assert_eq!(ResidueType::Gly.polar_h_period(), 0.0);
     }
 }

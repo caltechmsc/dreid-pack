@@ -22,10 +22,11 @@ readme = "README.md"
 [dependencies]
 arrayvec = "0.7.6"
 thiserror = "2.0.18"
-dreid-forge = "0.4.0"
-dreid-kernel = "0.4.1"
+dreid-forge = "0.4.1"
+dreid-kernel = "0.4.2"
 dunbrack = "0.1.0"
-rotamer = "0.1.0"
+rotamer = "0.2.0"
+rayon = "1.11.0"
 
 [dev-dependencies]
 approx = "0.5.1"

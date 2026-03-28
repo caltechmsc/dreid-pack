@@ -18,4 +18,8 @@ pub enum Error {
     /// Force-field parameterization failure.
     #[error("force-field parameterization error: {0}")]
     Forge(String),
+
+    /// Packing scope configuration error.
+    #[error("packing scope error: {0}")]
+    Scope(String),
 }

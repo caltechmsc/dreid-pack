@@ -25,14 +25,14 @@ pub struct FixedAtoms<'a> {
 }
 
 impl<'a> FixedAtoms<'a> {
-    /// Borrows `pool` and builds the spatial index with `cell_size = vdw_cutoff`.
+    /// Borrows `pool` and builds the spatial index with the given `cell_size`.
     ///
     /// # Panics
     ///
-    /// Panics if atom count exceeds `u32::MAX`, if `vdw_cutoff ≤ 0`, or if
+    /// Panics if atom count exceeds `u32::MAX`, if `cell_size ≤ 0`, or if
     /// `pool.types`, `pool.charges`, or `pool.donor_for_h` differ in length
     /// from `pool.positions`.
-    pub fn build(pool: &'a FixedAtomPool, vdw_cutoff: f32) -> Self {
+    pub fn build(pool: &'a FixedAtomPool, cell_size: f32) -> Self {
         let n = pool.positions.len();
         assert!(
             n <= u32::MAX as usize,
@@ -51,7 +51,7 @@ impl<'a> FixedAtoms<'a> {
                 .copied()
                 .enumerate()
                 .map(|(i, pos)| (pos, i as u32)),
-            vdw_cutoff,
+            cell_size,
         );
         Self {
             positions: &pool.positions,
@@ -60,16 +60,6 @@ impl<'a> FixedAtoms<'a> {
             donor_for_h: &pool.donor_for_h,
             grid,
         }
-    }
-
-    /// Number of fixed atoms.
-    pub fn len(&self) -> usize {
-        self.positions.len()
-    }
-
-    /// Returns `true` if there are no fixed atoms.
-    pub fn is_empty(&self) -> bool {
-        self.positions.is_empty()
     }
 
     /// Yields `(position, atom_index)` for every fixed atom within `radius` Å
@@ -109,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn build_from_empty_pool_is_empty() {
+    fn build_from_empty_pool_has_no_positions() {
         let pool = FixedAtomPool {
             positions: vec![],
             types: vec![],
@@ -117,16 +107,14 @@ mod tests {
             donor_for_h: vec![],
         };
         let fa = FixedAtoms::build(&pool, 8.0);
-        assert!(fa.is_empty());
-        assert_eq!(fa.len(), 0);
+        assert!(fa.positions.is_empty());
     }
 
     #[test]
-    fn len_matches_pool_atom_count() {
+    fn positions_len_matches_pool_atom_count() {
         let pool = linear_pool(7, 2.0);
         let fa = FixedAtoms::build(&pool, 8.0);
-        assert!(!fa.is_empty());
-        assert_eq!(fa.len(), 7);
+        assert_eq!(fa.positions.len(), 7);
     }
 
     #[test]

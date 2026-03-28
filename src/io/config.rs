@@ -21,6 +21,8 @@ pub struct ReadConfig {
     pub topology: TopologyConfig,
     /// Force-field parameterization settings.
     pub ff: ForceFieldConfig,
+    /// Which residues are treated as mobile (repacked).
+    pub scope: PackingScope,
 }
 
 /// Atom and residue removal policy applied before protonation.
@@ -344,4 +346,42 @@ pub enum DampingStrategy {
     Fixed(f64),
     /// Adaptive damping — adjusts automatically based on convergence behavior.
     Auto { initial: f64 },
+}
+
+/// Scope of the packing — which residues are mobile.
+#[derive(Debug, Clone, Default)]
+pub enum PackingScope {
+    /// All standard packable residues are mobile.
+    #[default]
+    Full,
+
+    /// Residues near an anchor entity (typically a ligand or cofactor).
+    ///
+    /// A standard packable residue is mobile if any of its heavy atoms
+    /// is within `radius` Å of any heavy atom belonging to the anchor
+    /// residue.
+    ///
+    /// **Note:** the anchor residue itself must not be removed by
+    /// [`CleanConfig`].
+    Pocket {
+        /// Residue selector identifying the anchor entity.
+        anchor: ResidueSelector,
+        /// Heavy-atom distance cutoff in Å.
+        radius: f32,
+    },
+
+    /// Residues at the interface between two chain groups.
+    ///
+    /// A standard packable residue in either group is mobile if any of
+    /// its heavy atoms is within `cutoff` Å of any heavy atom in the
+    /// other group.
+    Interface {
+        /// Two sets of chain identifiers.
+        groups: [Vec<String>; 2],
+        /// Inter-group heavy-atom distance cutoff in Å.
+        cutoff: f32,
+    },
+
+    /// Explicit list of mobile residues.
+    List(Vec<ResidueSelector>),
 }
