@@ -121,7 +121,10 @@ fn to_forge_config(c: &ForceFieldConfig) -> dreid_forge::ForgeConfig {
     }
 }
 
-fn to_charge_method(c: &ChargeConfig) -> dreid_forge::ChargeMethod {
+fn to_charge_method(c: &Option<ChargeConfig>) -> dreid_forge::ChargeMethod {
+    let Some(c) = c else {
+        return dreid_forge::ChargeMethod::None;
+    };
     dreid_forge::ChargeMethod::Hybrid(dreid_forge::HybridConfig {
         protein_scheme: to_protein_scheme(c.protein_scheme),
         nucleic_scheme: to_nucleic_scheme(c.nucleic_scheme),

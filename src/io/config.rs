@@ -134,7 +134,9 @@ pub struct ForceFieldConfig {
     /// Default [`VdwPotential::Buckingham`] (Buckingham exp-6 potential).
     pub vdw: VdwPotential,
     /// Partial charge assignment settings.
-    pub charge: ChargeConfig,
+    ///
+    /// Default `None`.
+    pub charge: Option<ChargeConfig>,
 }
 
 /// Van der Waals non-bonded potential form.
