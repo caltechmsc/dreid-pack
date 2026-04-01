@@ -287,7 +287,8 @@ impl Progress for PhaseSpinner {
     }
 
     fn dp_done(&self) {
-        self.dp.finish("");
+        self.dp
+            .finish("Global Minimum Energy Conformation (GMEC) found");
     }
 }
 
