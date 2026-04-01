@@ -79,7 +79,7 @@ pub fn print_completion(label: &str, n: usize, elapsed: Duration, output: &Path)
         "  {}  {} residues  {}  🎉",
         style(label).green().bold(),
         style(fmt(n)).bold(),
-        style(dur(elapsed)).dim(),
+        style(dur(elapsed)).dim().italic(),
     );
     eprintln!(
         "  {}  {}",
@@ -299,7 +299,7 @@ fn done_line(name: &str, stats: &str, elapsed: Duration) -> String {
 
     let check = style("✓").green().bold();
     let name_s = style(format!("{name:<22}")).bold();
-    let time_d = style(&time_s).dim();
+    let time_d = style(&time_s).dim().italic();
 
     if stats.is_empty() {
         format!("  {check}  {name_s}  {pre_pad}{time_d}")
