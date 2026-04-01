@@ -11,4 +11,5 @@ pub use model::system::{
 pub use model::types::{TypeIdx, Vec3};
 
 pub use pack::PackConfig;
+pub use pack::Progress;
 pub use pack::pack;
