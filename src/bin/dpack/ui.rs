@@ -76,7 +76,7 @@ pub fn print_banner() {
 pub fn print_completion(label: &str, n: usize, elapsed: Duration, output: &Path) {
     eprintln!();
     eprintln!(
-        "  {}  {} residues  {}",
+        "  {}  {} residues  {}  🎉",
         style(label).green().bold(),
         style(fmt(n)).bold(),
         style(dur(elapsed)).dim(),
