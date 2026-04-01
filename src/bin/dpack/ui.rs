@@ -19,7 +19,7 @@ fn done_style() -> ProgressStyle {
     ProgressStyle::with_template("{msg}").unwrap()
 }
 
-const LOGO: &str = r#"
+const BANNER: &str = r#"
 ________________________________________     ________             ______
 ___  __ \__  __ \__  ____/___  _/__  __ \    ___  __ \_____ _________  /__
 __  / / /_  /_/ /_  __/   __  / __  / / /    __  /_/ /  __ `/  ___/_  //_/
@@ -33,16 +33,23 @@ _  /_/ /_  _, _/_  /___  __/ /  _  /_/ /     _  ____// /_/ // /__ _  ,<
     H     H   O     CH₂OH     H   H   O    CH₂COOH    H         O─H
 "#;
 
-pub fn print_logo() {
-    for (i, line) in LOGO.lines().enumerate() {
-        match i {
-            0 => eprintln!(),
-            1..=5 => eprintln!("{}", style(line).color256(208).bold()),
-            6 => eprintln!("{}", style(line).dim()),
-            _ => eprintln!("{}", colorize_structure(line)),
+pub fn banner() -> String {
+    let mut out = String::new();
+    for (i, line) in BANNER.lines().enumerate() {
+        let colorized = match i {
+            0 => String::new(),
+            1..=5 => format!("{}", style(line).color256(208).bold()),
+            6 => format!("{}", style(line).dim()),
+            _ => colorize_structure(line),
+        };
+        if i == 0 {
+            out.push('\n');
+        } else {
+            out.push_str(&colorized);
+            out.push('\n');
         }
     }
-    eprintln!();
+    out
 }
 
 fn colorize_structure(line: &str) -> String {
@@ -59,6 +66,11 @@ fn colorize_structure(line: &str) -> String {
         });
     }
     out
+}
+
+pub fn print_banner() {
+    eprint!("{}", banner());
+    eprintln!();
 }
 
 pub fn print_completion(label: &str, n: usize, elapsed: Duration, output: &Path) {
