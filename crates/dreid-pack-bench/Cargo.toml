@@ -10,6 +10,9 @@ publish = false
 
 [dependencies]
 dreid-pack = { path = "../dreid-pack" }
+bio-forge = "0.4.1"
+arrayvec = "0.7.6"
+thiserror = "2.0.18"
 
 [lib]
 name = "dreid_pack_bench"
