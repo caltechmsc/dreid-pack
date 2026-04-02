@@ -1,3 +1,4 @@
+mod bfactor;
 mod config;
 mod error;
 mod format;
