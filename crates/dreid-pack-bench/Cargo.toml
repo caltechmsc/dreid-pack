@@ -11,6 +11,6 @@ publish = false
 [dependencies]
 dreid-pack = { path = "../dreid-pack" }
 
-[[bin]]
-name = "dpack-bench"
-path = "src/main.rs"
+[lib]
+name = "dreid_pack_bench"
+path = "src/lib.rs"
