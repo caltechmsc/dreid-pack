@@ -36,6 +36,17 @@ impl Session {
     pub(super) fn metadata(&self) -> &SystemMetadata {
         &self.metadata
     }
+
+    /// Residue locators for all mobile sidechains.
+    ///
+    /// Yields `(chain_id, residue_id, insertion_code)` for each packable
+    /// residue in declaration order.
+    pub fn mobile_residues(&self) -> impl Iterator<Item = (&str, i32, Option<char>)> + '_ {
+        self.metadata
+            .mobile_residues
+            .iter()
+            .map(|m| (m.chain_id.as_str(), m.residue_id, m.insertion_code))
+    }
 }
 
 /// Topology bookkeeping that accompanies a [`System`].
