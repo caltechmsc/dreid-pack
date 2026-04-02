@@ -33,7 +33,6 @@ pub fn sidechain(
     Some((sum_sq / count as f64).sqrt())
 }
 
-#[inline]
 fn is_backbone(name: &str) -> bool {
     matches!(
         name,
