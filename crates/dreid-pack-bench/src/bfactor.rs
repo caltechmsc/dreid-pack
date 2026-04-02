@@ -4,16 +4,44 @@ use dreid_pack::io::Format;
 
 use crate::error::Error;
 
-pub type BfactorMap = HashMap<(String, i32, Option<char>), f32>;
+pub fn retain(
+    bytes: &[u8],
+    fmt: Format,
+    locators: &[(String, i32, Option<char>)],
+    percentile: f32,
+) -> Result<Vec<bool>, Error> {
+    if percentile >= 1.0 {
+        return Ok(vec![true; locators.len()]);
+    }
 
-pub fn parse(bytes: &[u8], fmt: Format) -> Result<BfactorMap, Error> {
+    let map = parse(bytes, fmt)?;
+
+    let values: Vec<f32> = locators
+        .iter()
+        .filter_map(|loc| map.get(loc).copied())
+        .collect();
+
+    let cutoff = percentile_value(&values, percentile);
+
+    Ok(locators
+        .iter()
+        .map(|loc| match map.get(loc) {
+            Some(&bf) => bf < cutoff,
+            None => true,
+        })
+        .collect())
+}
+
+type BfactorMap = HashMap<(String, i32, Option<char>), f32>;
+
+fn parse(bytes: &[u8], fmt: Format) -> Result<BfactorMap, Error> {
     match fmt {
         Format::Pdb => parse_pdb(bytes),
         Format::Mmcif => parse_mmcif(bytes),
     }
 }
 
-pub fn percentile(values: &[f32], p: f32) -> f32 {
+fn percentile_value(values: &[f32], p: f32) -> f32 {
     if values.is_empty() {
         return 0.0;
     }
@@ -33,8 +61,7 @@ fn parse_pdb(bytes: &[u8]) -> Result<BfactorMap, Error> {
         if bytes.len() < 66 {
             continue;
         }
-        let record = &line[..6];
-        if !record.starts_with("ATOM") {
+        if !line[..6].starts_with("ATOM") {
             continue;
         }
 
