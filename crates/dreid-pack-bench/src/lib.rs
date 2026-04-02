@@ -1,4 +1,5 @@
 mod bfactor;
+mod chi;
 mod config;
 mod error;
 mod format;
