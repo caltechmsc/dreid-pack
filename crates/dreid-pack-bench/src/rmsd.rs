@@ -1,6 +1,6 @@
 use bio_forge::{Element, Structure};
 
-pub fn sidechain_rmsd(
+pub fn sidechain(
     crystal: &Structure,
     packed: &Structure,
     chain_id: &str,
@@ -33,6 +33,7 @@ pub fn sidechain_rmsd(
     Some((sum_sq / count as f64).sqrt())
 }
 
+#[inline]
 fn is_backbone(name: &str) -> bool {
     matches!(
         name,
