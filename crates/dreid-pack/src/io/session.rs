@@ -130,7 +130,11 @@ pub struct MobileSidechain {
 mod tests {
     use super::*;
     use crate::model::{
-        system::{FixedAtomPool, ForceFieldParams, HBondParams, LjMatrix, VdwMatrix},
+        residue::ResidueType,
+        system::{
+            FixedAtomPool, ForceFieldParams, HBondParams, LjMatrix, Residue, SidechainAtoms,
+            VdwMatrix,
+        },
         types::{TypeIdx, Vec3},
     };
     use std::collections::{HashMap, HashSet};
@@ -159,6 +163,40 @@ mod tests {
                 types: vec![TypeIdx(0); n],
                 charges: vec![0.0f32; n],
                 donor_for_h: vec![u32::MAX; n],
+            },
+            ff: ForceFieldParams {
+                vdw: VdwMatrix::LennardJones(LjMatrix::new(0, vec![])),
+                hbond: HBondParams::new(HashSet::new(), HashSet::new(), HashMap::new()),
+            },
+        }
+    }
+
+    fn mobile_residue_entry() -> Residue {
+        let n = ResidueType::Ser.n_atoms() as usize;
+        Residue::new(
+            ResidueType::Ser,
+            [Vec3::new(0.0, 0.0, 0.0); 3],
+            0.0,
+            0.0,
+            0.0,
+            SidechainAtoms {
+                coords: &vec![Vec3::new(0.0, 0.0, 0.0); n],
+                types: &vec![TypeIdx(0); n],
+                charges: &vec![0.0f32; n],
+                donor_of_h: &vec![u8::MAX; n],
+            },
+        )
+        .unwrap()
+    }
+
+    fn system_with_n_mobile(n: usize) -> System {
+        System {
+            mobile: (0..n).map(|_| mobile_residue_entry()).collect(),
+            fixed: FixedAtomPool {
+                positions: vec![],
+                types: vec![],
+                charges: vec![],
+                donor_for_h: vec![],
             },
             ff: ForceFieldParams {
                 vdw: VdwMatrix::LennardJones(LjMatrix::new(0, vec![])),
@@ -537,6 +575,112 @@ mod tests {
         );
         assert_eq!(sess.metadata().box_vectors, Some(bv));
         assert!(sess.metadata().bonds.is_empty());
+    }
+
+    #[test]
+    fn session_mobile_residues_empty_on_no_mobile() {
+        let sess = Session::new(empty_system(), empty_metadata());
+        assert_eq!(sess.mobile_residues().count(), 0);
+    }
+
+    #[test]
+    fn session_mobile_residues_count_matches_len() {
+        let n = 3;
+        let sess = Session::new(
+            system_with_n_mobile(n),
+            SystemMetadata {
+                mobile_residues: vec![mobile_sidechain(); n],
+                ..empty_metadata()
+            },
+        );
+        assert_eq!(sess.mobile_residues().count(), n);
+    }
+
+    #[test]
+    fn session_mobile_residues_yields_chain_id() {
+        let sess = Session::new(
+            system_with_n_mobile(1),
+            SystemMetadata {
+                mobile_residues: vec![MobileSidechain {
+                    chain_id: "B".to_string(),
+                    ..mobile_sidechain()
+                }],
+                ..empty_metadata()
+            },
+        );
+        let (chain, _, _) = sess.mobile_residues().next().unwrap();
+        assert_eq!(chain, "B");
+    }
+
+    #[test]
+    fn session_mobile_residues_yields_residue_id() {
+        let sess = Session::new(
+            system_with_n_mobile(1),
+            SystemMetadata {
+                mobile_residues: vec![MobileSidechain {
+                    residue_id: 42,
+                    ..mobile_sidechain()
+                }],
+                ..empty_metadata()
+            },
+        );
+        let (_, id, _) = sess.mobile_residues().next().unwrap();
+        assert_eq!(id, 42);
+    }
+
+    #[test]
+    fn session_mobile_residues_yields_insertion_code() {
+        let without = Session::new(
+            system_with_n_mobile(1),
+            SystemMetadata {
+                mobile_residues: vec![mobile_sidechain()],
+                ..empty_metadata()
+            },
+        );
+        let with_ins = Session::new(
+            system_with_n_mobile(1),
+            SystemMetadata {
+                mobile_residues: vec![MobileSidechain {
+                    insertion_code: Some('C'),
+                    ..mobile_sidechain()
+                }],
+                ..empty_metadata()
+            },
+        );
+        assert_eq!(without.mobile_residues().next().unwrap().2, None);
+        assert_eq!(with_ins.mobile_residues().next().unwrap().2, Some('C'));
+    }
+
+    #[test]
+    fn session_mobile_residues_preserves_declaration_order() {
+        let meta = vec![
+            MobileSidechain {
+                chain_id: "A".to_string(),
+                residue_id: 10,
+                ..mobile_sidechain()
+            },
+            MobileSidechain {
+                chain_id: "A".to_string(),
+                residue_id: 20,
+                ..mobile_sidechain()
+            },
+            MobileSidechain {
+                chain_id: "B".to_string(),
+                residue_id: 5,
+                ..mobile_sidechain()
+            },
+        ];
+        let sess = Session::new(
+            system_with_n_mobile(3),
+            SystemMetadata {
+                mobile_residues: meta,
+                ..empty_metadata()
+            },
+        );
+        let locs: Vec<_> = sess.mobile_residues().collect();
+        assert_eq!(locs[0], ("A", 10, None));
+        assert_eq!(locs[1], ("A", 20, None));
+        assert_eq!(locs[2], ("B", 5, None));
     }
 
     #[test]
