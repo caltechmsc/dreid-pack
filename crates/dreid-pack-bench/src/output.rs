@@ -23,8 +23,8 @@ impl ResidueTable {
         }
     }
 
-    pub fn slot_mut(&mut self, aa: AminoAcid) -> &mut Vec<Residue> {
-        &mut self.slots[aa as u8 as usize]
+    pub fn push(&mut self, aa: AminoAcid, residue: Residue) {
+        self.slots[aa as u8 as usize].push(residue);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (AminoAcid, &[Residue])> {
