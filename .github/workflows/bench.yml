@@ -1,0 +1,29 @@
+name: Benchmark
+
+on:
+  - push
+  - pull_request
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    name: Benchmark on DB379
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build release
+        run: cargo build -p dreid-pack-bench --release
+
+      - name: Run benchmark
+        run: cargo run -p dreid-pack-bench --release -- crates/dreid-pack-bench/data/db379 | tee /tmp/bench.txt
+
+      - name: Publish summary
+        run: |
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/bench.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
