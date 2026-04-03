@@ -22,7 +22,7 @@ pub const COULOMB_CONST: f32 = 332.0637;
 pub const HBOND_N: usize = 4;
 
 /// Maximum Dunbrack log-probability ratio cap (kcal/mol).
-pub const ROTAMER_BIAS_CAP: f32 = 5.0;
+pub const ROTAMER_BIAS_CAP: f32 = 8.0;
 
 // Invariant: `VDW_CUTOFF ≤ COULOMB_CUTOFF`.
 const _: () = assert!(
