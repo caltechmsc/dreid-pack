@@ -245,7 +245,7 @@ flowchart TD
             translib --> probf
             probf --> ph["Polar-H Expand\n(Ser/Thr/Cys/Tyr/Ash/Glh/Lys/Lyn)"]
             ph --> nerf["NERF Coordinate Build\n(code-generated per residue type)"]
-            nerf --> bias["Rotamer Bias\nw · min(−ln p/p_max, 5)"]
+            nerf --> bias["Rotamer Bias\nw · min(−ln p/p_max, 8)"]
         end
 
         subgraph s2 ["Contact Graph"]
@@ -269,7 +269,7 @@ flowchart TD
     selfe["Self-Energy: SC vs Scaffold"]
     selfe --> vdw1["VdW + H-bond + Coulomb\n(per-candidate, parallel)"]
     vdw1 --> addb["+ Weighted Rotamer Bias"]
-    addb --> thresh["Threshold Prune\n(e_min + 15 kcal/mol)"]
+    addb --> thresh["Threshold Prune\n(e_min + 30 kcal/mol)"]
     thresh --> compact["Compact Conformations"]
 
     compact --> paire
