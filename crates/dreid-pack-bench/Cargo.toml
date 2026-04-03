@@ -13,7 +13,20 @@ dreid-pack = { path = "../dreid-pack" }
 bio-forge = "0.4.1"
 arrayvec = "0.7.6"
 thiserror = "2.0.18"
+anyhow = { version = "1.0.102", optional = true }
+clap = { version = "4.6.0", features = ["derive"], optional = true }
+indicatif = { version = "0.18.4", optional = true }
+console = { version = "0.16.3", optional = true }
 
 [lib]
 name = "dreid_pack_bench"
 path = "src/lib.rs"
+
+[[bin]]
+name = "dpack-bench"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:anyhow", "dep:clap", "dep:indicatif", "dep:console"]
