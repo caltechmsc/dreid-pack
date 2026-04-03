@@ -117,7 +117,7 @@ Output defaults to `<stem>-packed.<ext>` when omitted.
 | `--no-polar-h`             | Skip polar-hydrogen torsion sampling  | sample  |
 | `--include-input`          | Add input conformation as candidate   | off     |
 | `-T, --template <MOL2>`    | Hetero residue template (repeatable)  | —       |
-| `-E, --self-energy <E>`    | Self-energy pruning window (kcal/mol) | `15.0`  |
+| `-E, --self-energy <E>`    | Self-energy pruning window (kcal/mol) | `30.0`  |
 | `-p, --prob-cutoff <P>`    | Min Dunbrack rotamer probability      | `0.0`   |
 | `-q, --quiet`              | Suppress progress output              | off     |
 
