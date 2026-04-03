@@ -2,7 +2,7 @@
 
 **Full-atom protein side-chain packing powered by the DREIDING force field.**
 
-[Overview](#overview) • [Installation](#installation) • [CLI](#cli) • [Library](#library) • [Pipeline & Algorithm](#pipeline--algorithm) • [License](#license)
+[Overview](#overview) • [Installation](#installation) • [CLI](#cli) • [Library](#library) • [Benchmark](#benchmark) • [Pipeline & Algorithm](#pipeline--algorithm) • [License](#license)
 
 ---
 
@@ -149,6 +149,45 @@ io::write(writer, &session, Format::Pdb)?;
 `pack::<()>` uses zero-cost no-op progress tracking. Implement the `Progress` trait for custom phase-level callbacks.
 
 Please see the [API documentation](https://docs.rs/dreid-pack) for details.
+
+## Benchmark
+
+Evaluated on DB379 — 379 non-redundant X-ray crystal structures. B-factor filter: residues above the per-structure 75th-percentile heavy-atom B-factor are excluded. 68,550 residues across 18 residue types.
+
+| Metric |       20° |   40° |
+| :----- | --------: | ----: |
+| χ1     |     87.7% | 90.1% |
+| χ1+2   |     74.1% | 82.4% |
+| χ1–4   | **68.8%** | 76.6% |
+
+**SC-RMSD**: _0.761 Å_
+
+| AA  |     N | χ1–4 20° | χ1–4 40° | RMSD/Å |
+| :-- | ----: | -------: | -------: | -----: |
+| ARG | 3,332 |    33.6% |    40.5% |  2.074 |
+| ASN | 3,235 |    59.0% |    80.2% |  0.794 |
+| ASP | 4,178 |    53.3% |    74.5% |  0.802 |
+| CYS |   792 |    91.4% |    92.6% |  0.324 |
+| GLN | 2,490 |    41.5% |    62.8% |  1.064 |
+| GLU | 3,893 |    26.7% |    48.2% |  1.148 |
+| HIS | 1,734 |    60.9% |    82.3% |  0.949 |
+| ILE | 5,616 |    83.5% |    85.1% |  0.401 |
+| LEU | 8,937 |    84.0% |    86.6% |  0.519 |
+| LYS | 3,330 |    29.8% |    34.4% |  1.142 |
+| MET | 1,672 |    50.6% |    58.7% |  0.936 |
+| PHE | 3,839 |    80.5% |    93.1% |  1.126 |
+| PRO | 3,927 |    78.2% |    80.2% |  0.244 |
+| SER | 4,941 |    61.7% |    62.5% |  0.698 |
+| THR | 5,040 |    92.4% |    93.1% |  0.296 |
+| TRP | 1,373 |    73.7% |    84.5% |  1.134 |
+| TYR | 3,161 |    76.6% |    88.9% |  1.418 |
+| VAL | 7,060 |    94.4% |    94.8% |  0.256 |
+
+DB379 structures ship with the repository. Run:
+
+```bash
+cargo run -p dreid-pack-bench --release -- crates/dreid-pack-bench/data/db379
+```
 
 ## Pipeline & Algorithm
 
