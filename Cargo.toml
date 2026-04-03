@@ -1,5 +1,8 @@
-[package]
-name = "dreid-pack"
+[workspace]
+resolver = "3"
+members = ["crates/dreid-pack", "crates/dreid-pack-bench"]
+
+[workspace.package]
 version = "0.1.0"
 authors = [
     "Tony Kan <tonykan@caltech.edu>",
@@ -8,48 +11,7 @@ authors = [
 license = "MIT"
 repository = "https://github.com/caltechmsc/dreid-pack"
 edition = "2024"
-description = "A high-performance, pure Rust library and CLI for full-atom protein side-chain packing using the DREIDING force field, Goldstein+Split DEE, and tree-decomposition DP—with native protein-ligand and protein-nucleic acid interface support."
-keywords = [
-    "structural-biology",
-    "bioinformatics",
-    "cheminformatics",
-    "dreiding",
-    "protein",
-]
-categories = [
-    "science::computational-biology::structural-modeling",
-    "command-line-utilities",
-]
 readme = "README.md"
-
-[dependencies]
-arrayvec = "0.7.6"
-thiserror = "2.0.18"
-dreid-forge = "0.4.2"
-dreid-kernel = "0.4.2"
-dunbrack = "0.1.0"
-rotamer = "0.2.0"
-rayon = "1.11.0"
-anyhow = { version = "1.0.102", optional = true }
-clap = { version = "4.6.0", features = ["derive"], optional = true }
-indicatif = { version = "0.18.4", optional = true }
-console = { version = "0.16.3", optional = true }
-
-[dev-dependencies]
-approx = "0.5.1"
-
-[lib]
-name = "dreid_pack"
-path = "src/lib.rs"
-
-[[bin]]
-name = "dpack"
-path = "src/bin/dpack/main.rs"
-required-features = ["cli"]
-
-[features]
-default = ["cli"]
-cli = ["dep:anyhow", "dep:clap", "dep:indicatif", "dep:console"]
 
 [profile.release]
 opt-level = 3
