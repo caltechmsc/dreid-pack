@@ -117,7 +117,7 @@ Output defaults to `<stem>-packed.<ext>` when omitted.
 | `--no-polar-h`             | Skip polar-hydrogen torsion sampling  | sample  |
 | `--include-input`          | Add input conformation as candidate   | off     |
 | `-T, --template <MOL2>`    | Hetero residue template (repeatable)  | —       |
-| `-E, --self-energy <E>`    | Self-energy pruning window (kcal/mol) | `15.0`  |
+| `-E, --self-energy <E>`    | Self-energy pruning window (kcal/mol) | `30.0`  |
 | `-p, --prob-cutoff <P>`    | Min Dunbrack rotamer probability      | `0.0`   |
 | `-q, --quiet`              | Suppress progress output              | off     |
 
@@ -156,32 +156,32 @@ Evaluated on DB379 — 379 non-redundant X-ray crystal structures. B-factor filt
 
 | Metric |       20° |   40° |
 | :----- | --------: | ----: |
-| χ1     |     87.7% | 90.1% |
-| χ1+2   |     74.1% | 82.4% |
-| χ1–4   | **68.8%** | 76.6% |
+| χ1     |     88.8% | 91.1% |
+| χ1+2   |     76.1% | 84.1% |
+| χ1–4   | **71.5%** | 79.1% |
 
-**SC-RMSD**: _0.761 Å_
+**SC-RMSD**: _0.728 Å_
 
 | AA  |     N | χ1–4 20° | χ1–4 40° | RMSD/Å |
 | :-- | ----: | -------: | -------: | -----: |
-| ARG | 3,332 |    33.6% |    40.5% |  2.074 |
-| ASN | 3,235 |    59.0% |    80.2% |  0.794 |
-| ASP | 4,178 |    53.3% |    74.5% |  0.802 |
-| CYS |   792 |    91.4% |    92.6% |  0.324 |
-| GLN | 2,490 |    41.5% |    62.8% |  1.064 |
-| GLU | 3,893 |    26.7% |    48.2% |  1.148 |
-| HIS | 1,734 |    60.9% |    82.3% |  0.949 |
-| ILE | 5,616 |    83.5% |    85.1% |  0.401 |
-| LEU | 8,937 |    84.0% |    86.6% |  0.519 |
-| LYS | 3,330 |    29.8% |    34.4% |  1.142 |
-| MET | 1,672 |    50.6% |    58.7% |  0.936 |
-| PHE | 3,839 |    80.5% |    93.1% |  1.126 |
-| PRO | 3,927 |    78.2% |    80.2% |  0.244 |
-| SER | 4,941 |    61.7% |    62.5% |  0.698 |
-| THR | 5,040 |    92.4% |    93.1% |  0.296 |
-| TRP | 1,373 |    73.7% |    84.5% |  1.134 |
-| TYR | 3,161 |    76.6% |    88.9% |  1.418 |
-| VAL | 7,060 |    94.4% |    94.8% |  0.256 |
+| ARG | 3,332 |    34.4% |    41.4% |  2.005 |
+| ASN | 3,235 |    65.3% |    84.8% |  0.749 |
+| ASP | 4,178 |    61.8% |    81.2% |  0.742 |
+| CYS |   792 |    88.6% |    89.8% |  0.372 |
+| GLN | 2,490 |    40.0% |    60.7% |  1.084 |
+| GLU | 3,893 |    29.2% |    50.8% |  1.131 |
+| HIS | 1,734 |    62.2% |    84.2% |  0.950 |
+| ILE | 5,616 |    84.3% |    85.9% |  0.393 |
+| LEU | 8,937 |    85.8% |    88.6% |  0.493 |
+| LYS | 3,330 |    37.1% |    42.6% |  1.101 |
+| MET | 1,672 |    53.1% |    60.8% |  0.902 |
+| PHE | 3,839 |    82.1% |    94.1% |  1.102 |
+| PRO | 3,927 |    78.7% |    80.7% |  0.241 |
+| SER | 4,941 |    69.7% |    70.8% |  0.581 |
+| THR | 5,040 |    93.5% |    94.2% |  0.276 |
+| TRP | 1,373 |    75.4% |    85.8% |  1.103 |
+| TYR | 3,161 |    79.5% |    91.5% |  1.309 |
+| VAL | 7,060 |    94.7% |    95.0% |  0.250 |
 
 DB379 structures ship with the repository. Run:
 
@@ -245,7 +245,7 @@ flowchart TD
             translib --> probf
             probf --> ph["Polar-H Expand\n(Ser/Thr/Cys/Tyr/Ash/Glh/Lys/Lyn)"]
             ph --> nerf["NERF Coordinate Build\n(code-generated per residue type)"]
-            nerf --> bias["Rotamer Bias\nw · min(−ln p/p_max, 5)"]
+            nerf --> bias["Rotamer Bias\nw · min(−ln p/p_max, 8)"]
         end
 
         subgraph s2 ["Contact Graph"]
@@ -269,7 +269,7 @@ flowchart TD
     selfe["Self-Energy: SC vs Scaffold"]
     selfe --> vdw1["VdW + H-bond + Coulomb\n(per-candidate, parallel)"]
     vdw1 --> addb["+ Weighted Rotamer Bias"]
-    addb --> thresh["Threshold Prune\n(e_min + 15 kcal/mol)"]
+    addb --> thresh["Threshold Prune\n(e_min + 30 kcal/mol)"]
     thresh --> compact["Compact Conformations"]
 
     compact --> paire

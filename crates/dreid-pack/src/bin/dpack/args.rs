@@ -240,7 +240,7 @@ pub struct PackingArgs {
     pub templates: Vec<PathBuf>,
 
     /// Self-energy pruning threshold (kcal/mol).
-    #[arg(short = 'E', long, default_value_t = 15.0)]
+    #[arg(short = 'E', long, default_value_t = 30.0)]
     pub self_energy: f32,
 
     /// Minimum Dunbrack rotamer probability cutoff.
