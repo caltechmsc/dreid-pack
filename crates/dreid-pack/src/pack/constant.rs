@@ -19,7 +19,7 @@ pub const COULOMB_CUTOFF_SQ: f32 = COULOMB_CUTOFF * COULOMB_CUTOFF;
 pub const COULOMB_CONST: f32 = 332.0637;
 
 /// DREIDING hydrogen bond cosine exponent.
-pub const HBOND_N: usize = 2;
+pub const HBOND_N: usize = 4;
 
 /// Maximum Dunbrack log-probability ratio cap (kcal/mol).
 pub const ROTAMER_BIAS_CAP: f32 = 5.0;
