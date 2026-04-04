@@ -1089,13 +1089,8 @@ mod tests {
     ) -> (SelfEnergyTable, PairEnergyTable, ContactGraph) {
         let self_e = SelfEnergyTable::new(&counts);
         let mut pair_e = PairEnergyTable::new(&[(counts[0], counts[1])]);
+        pair_e.matrices_mut()[0].copy_from_slice(pair_data);
         let graph = ContactGraph::build(2, [(0u32, 1u32)]);
-        let (ni, nj) = (counts[0] as usize, counts[1] as usize);
-        for ri in 0..ni {
-            for rj in 0..nj {
-                pair_e.set(0, ri, rj, pair_data[ri * nj + rj]);
-            }
-        }
         (self_e, pair_e, graph)
     }
 
@@ -1315,9 +1310,9 @@ mod tests {
         let mut pair_e = PairEnergyTable::new(&[(2, 2), (2, 2), (2, 2)]);
         let graph = ContactGraph::build(3, [(0u32, 1u32), (0u32, 2u32), (1u32, 2u32)]);
 
-        for edge in 0..3 {
-            pair_e.set(edge, 0, 1, 10.0);
-            pair_e.set(edge, 1, 0, 10.0);
+        for s in pair_e.matrices_mut() {
+            s[0 * 2 + 1] = 10.0;
+            s[1 * 2 + 0] = 10.0;
         }
 
         let result = dp(&mut self_e, &pair_e, &graph);

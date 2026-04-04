@@ -341,16 +341,10 @@ mod tests {
         pair_data: &[f32],
     ) -> (SelfEnergyTable, PairEnergyTable, ContactGraph) {
         let self_e = SelfEnergyTable::new(&counts);
-        let pair_e = PairEnergyTable::new(&[(counts[0], counts[1])]);
-        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
+        let mut pair_e = PairEnergyTable::new(&[(counts[0], counts[1])]);
         debug_assert_eq!(pair_data.len(), counts[0] as usize * counts[1] as usize);
-        let mut pair_e = pair_e;
-        let (ni, nj) = (counts[0] as usize, counts[1] as usize);
-        for ri in 0..ni {
-            for rj in 0..nj {
-                pair_e.set(0, ri, rj, pair_data[ri * nj + rj]);
-            }
-        }
+        pair_e.matrices_mut()[0].copy_from_slice(pair_data);
+        let graph = ContactGraph::build(2, [(0u32, 1u32)]);
         (self_e, pair_e, graph)
     }
 
