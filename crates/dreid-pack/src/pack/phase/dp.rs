@@ -4,6 +4,7 @@ use crate::pack::model::{
 };
 use rayon::prelude::*;
 use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
 /// Pair-energy significance threshold (kcal/mol). Edges where every surviving
 /// candidate pair has `|pair_e| ≤ PAIR_CUT` are dropped from the work graph.
@@ -384,7 +385,7 @@ fn mcs_order(matrix: &[bool], n: usize) -> Vec<usize> {
     for i in (1..=n).rev() {
         let v = (0..n)
             .filter(|&v| !numbered[v])
-            .min_by_key(|&v| (Reverse(card[v]), v))
+            .max_by_key(|&v| (card[v], Reverse(v)))
             .unwrap();
         sigma[v] = i;
         numbered[v] = true;
@@ -486,7 +487,7 @@ fn build_bags(
     Some((bags, width))
 }
 
-/// Builds bags with dynamic min-fill vertex selection (single pass).
+/// Builds bags with incremental min-fill vertex selection using a priority queue.
 fn build_bags_min_fill(
     matrix: &mut [bool],
     n: usize,
@@ -496,42 +497,102 @@ fn build_bags_min_fill(
     let mut bags = Vec::with_capacity(n);
     let mut width = 0;
 
+    let mut fill_cost = vec![0u32; n];
+    let mut epoch = vec![0u32; n];
+
+    for v in 0..n {
+        fill_cost[v] = compute_fill(matrix, n, v, &eliminated);
+    }
+
+    let mut heap = BinaryHeap::with_capacity(n);
+    for v in 0..n {
+        heap.push(Reverse((fill_cost[v], v as u32, epoch[v])));
+    }
+
     for _ in 0..n {
-        let v = (0..n)
-            .filter(|&v| !eliminated[v])
-            .min_by_key(|&v| {
-                let mut fill = 0u32;
-                for a in 0..n {
-                    if a == v || eliminated[a] || !matrix[v * n + a] {
-                        continue;
-                    }
-                    for b in (a + 1)..n {
-                        if b == v || eliminated[b] || !matrix[v * n + b] {
-                            continue;
-                        }
-                        if !matrix[a * n + b] {
-                            fill += 1;
-                        }
-                    }
-                }
-                (fill, v)
-            })
-            .unwrap();
+        let v = loop {
+            let Reverse((cost, v, g)) = heap.pop().unwrap();
+            let v = v as usize;
+            if eliminated[v] || g != epoch[v] {
+                continue;
+            }
+            if cost != fill_cost[v] {
+                epoch[v] = epoch[v].wrapping_add(1);
+                heap.push(Reverse((fill_cost[v], v as u32, epoch[v])));
+                continue;
+            }
+            break v;
+        };
 
         let sep = collect_sep(matrix, n, v, &eliminated);
         if sep.len() > max_width {
             return None;
         }
         width = width.max(sep.len());
-        apply_fill_in(matrix, n, &sep);
+
+        let mut affected = Vec::new();
+        for i in 0..sep.len() {
+            for j in (i + 1)..sep.len() {
+                let (a, b) = (sep[i] as usize, sep[j] as usize);
+                if !matrix[a * n + b] {
+                    matrix[a * n + b] = true;
+                    matrix[b * n + a] = true;
+                    affected.push(a);
+                    affected.push(b);
+                }
+            }
+        }
+
         eliminated[v] = true;
         bags.push(Bag {
             elim: v as u32,
             sep,
         });
+
+        let mut dirty: Vec<usize> = Vec::new();
+        for u in 0..n {
+            if !eliminated[u] && matrix[v * n + u] {
+                dirty.push(u);
+            }
+        }
+        dirty.extend_from_slice(&affected);
+        dirty.sort_unstable();
+        dirty.dedup();
+
+        for &u in &dirty {
+            if eliminated[u] {
+                continue;
+            }
+            let new_cost = compute_fill(matrix, n, u, &eliminated);
+            if new_cost != fill_cost[u] {
+                fill_cost[u] = new_cost;
+                epoch[u] = epoch[u].wrapping_add(1);
+                heap.push(Reverse((new_cost, u as u32, epoch[u])));
+            }
+        }
     }
 
     Some((bags, width))
+}
+
+/// Counts the number of missing edges among alive neighbors of `v`.
+fn compute_fill(matrix: &[bool], n: usize, v: usize, eliminated: &[bool]) -> u32 {
+    let row = &matrix[v * n..(v + 1) * n];
+    let mut fill = 0u32;
+    for a in 0..n {
+        if a == v || eliminated[a] || !row[a] {
+            continue;
+        }
+        for b in (a + 1)..n {
+            if b == v || eliminated[b] || !row[b] {
+                continue;
+            }
+            if !matrix[a * n + b] {
+                fill += 1;
+            }
+        }
+    }
+    fill
 }
 
 /// Ascending alive neighbours of `v` (separator at elimination time).
@@ -615,7 +676,7 @@ fn tree_dp(
     }
 
     let cn = local_self.len();
-    let edge_tbl = build_edge_table(cn, work_edges, gi, graph);
+    let edge_map = build_edge_map(work_edges, &gi, graph);
 
     let (alive_data, alive_off) = build_alive_table(local_self);
 
@@ -640,12 +701,14 @@ fn tree_dp(
                 .iter()
                 .enumerate()
                 .filter_map(|(d, &sci)| {
-                    let packed = edge_tbl[nd.elim_ci * cn + sci];
-                    if packed == u32::MAX {
-                        return None;
-                    }
-                    let edge_idx = (packed >> 1) as usize;
-                    let is_left = (packed & 1) != 0;
+                    let elim_is_lo = nd.elim_ci < sci;
+                    let key = if elim_is_lo {
+                        (nd.elim_ci as u32, sci as u32)
+                    } else {
+                        (sci as u32, nd.elim_ci as u32)
+                    };
+                    let &(edge_idx, lo_is_left) = edge_map.get(&key)?;
+                    let is_left = if elim_is_lo { lo_is_left } else { !lo_is_left };
                     let mat = pair_e.matrix(edge_idx);
                     let stride = pair_e.dims(edge_idx).1;
                     Some(EdgeInfo {
@@ -851,24 +914,21 @@ struct EdgeInfo<'a> {
     is_left: bool,
 }
 
-/// Builds a flat cn×cn table for O(1) edge lookup between component-local slots.
-/// Returns `u32::MAX` for no-edge, otherwise `(edge_idx << 1) | is_left_bit`.
-fn build_edge_table(
-    cn: usize,
+/// Builds a HashMap for O(1) edge lookup between component-local slot pairs.
+fn build_edge_map(
     work_edges: &[(u32, u32, u32)],
     gi: impl Fn(usize) -> usize,
     graph: &ContactGraph,
-) -> Vec<u32> {
-    let mut tbl = vec![u32::MAX; cn * cn];
+) -> HashMap<(u32, u32), (usize, bool)> {
+    let mut map = HashMap::with_capacity(work_edges.len());
     for &(ca, cb, eidx) in work_edges {
         let eidx = eidx as usize;
         let (ga, _) = graph.edges()[eidx];
         let ca_is_left = gi(ca as usize) == ga as usize;
-
-        tbl[ca as usize * cn + cb as usize] = ((eidx as u32) << 1) | ca_is_left as u32;
-        tbl[cb as usize * cn + ca as usize] = ((eidx as u32) << 1) | (!ca_is_left) as u32;
+        let key = (ca.min(cb), ca.max(cb));
+        map.insert(key, (eidx, ca_is_left));
     }
-    tbl
+    map
 }
 
 /// Builds a flat alive-rotamer table: `alive_data[off[ci]..off[ci+1]]` holds
