@@ -107,7 +107,6 @@ fn frame_energies<V: VdwKernel + Sync, const COUL: bool>(
             };
 
             (0..confs.n_candidates())
-                .into_par_iter()
                 .map(|r| self_energy::<V, COUL>(confs.coords_of(r), &atoms, fixed, vdw, hbond, c_d))
                 .collect()
         })
