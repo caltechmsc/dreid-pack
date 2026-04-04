@@ -17,6 +17,73 @@ const TREEWIDTH_CUT: usize = 5;
 /// Initial threshold for rank-1 edge decomposition.
 const EDGE_DECOMP_THRESHOLD_INIT: f32 = 0.5;
 
+/// Minimum work before parallelising the inner DP loop.
+const PAR_SEP_THRESHOLD: usize = 256;
+
+/// Sentinel value mapping a child separator slot to its parent's eliminated vertex.
+const ELIM_MARKER: u32 = u32::MAX;
+
+/// Compact symmetric adjacency matrix stored as a flat array of `u64` words.
+struct BitMatrix {
+    data: Vec<u64>,
+    stride: usize,
+    n: usize,
+}
+
+impl BitMatrix {
+    /// Creates a zero-initialised matrix for `n` vertices.
+    fn new(n: usize) -> Self {
+        let stride = n.div_ceil(64);
+        Self {
+            data: vec![0u64; n * stride],
+            stride,
+            n,
+        }
+    }
+
+    /// Creates a matrix from an adjacency-list representation.
+    fn from_adj(adj: &[Vec<u32>]) -> Self {
+        let mut m = Self::new(adj.len());
+        for (v, nbrs) in adj.iter().enumerate() {
+            for &u in nbrs {
+                m.set(v, u as usize);
+            }
+        }
+        m
+    }
+
+    /// Marks the edge (v, u) as present.
+    fn set(&mut self, v: usize, u: usize) {
+        self.data[v * self.stride + u / 64] |= 1u64 << (u % 64);
+    }
+
+    /// Returns `true` if the edge (v, u) is present.
+    fn test(&self, v: usize, u: usize) -> bool {
+        self.data[v * self.stride + u / 64] & (1u64 << (u % 64)) != 0
+    }
+
+    /// Returns the raw word slice for row `v`.
+    fn row(&self, v: usize) -> &[u64] {
+        &self.data[v * self.stride..(v + 1) * self.stride]
+    }
+
+    /// Tests bit `u` in a pre-fetched row slice.
+    fn test_in_row(row: &[u64], u: usize) -> bool {
+        row[u / 64] & (1u64 << (u % 64)) != 0
+    }
+
+    /// Makes `sep` vertices pairwise adjacent.
+    fn fill_in(&mut self, sep: &[u32]) {
+        for i in 0..sep.len() {
+            for j in (i + 1)..sep.len() {
+                let (a, b) = (sep[i] as usize, sep[j] as usize);
+                self.set(a, b);
+                self.set(b, a);
+            }
+        }
+    }
+}
+
 /// Finds the Global Minimum Energy Conformation (GMEC) for remaining
 /// multi-candidate slots via tree-decomposition dynamic programming.
 /// Returns one rotamer index per slot.
@@ -119,6 +186,19 @@ fn best_by_self(self_e: &SelfEnergyTable, s: usize) -> usize {
     best_r
 }
 
+/// Returns the index of the rotamer with minimum finite energy.
+fn min_energy_rot(se: &[f32]) -> usize {
+    let mut best_r = 0;
+    let mut best_e = PRUNED;
+    for (r, &e) in se.iter().enumerate() {
+        if e < best_e {
+            best_e = e;
+            best_r = r;
+        }
+    }
+    best_r
+}
+
 /// Returns `true` if any alive pair has `|pair_e| > PAIR_CUT`.
 fn is_significant(
     self_e: &SelfEnergyTable,
@@ -146,7 +226,7 @@ fn is_significant(
     })
 }
 
-/// Pair-energy lookup for `(ci_at_slot_i, cj_at_neighbor)` on `edge`.
+/// Pair-energy lookup respecting the left/right orientation of an edge.
 fn pair_val(mat: &[f32], stride: usize, is_left: bool, ci: usize, cj: usize) -> f32 {
     if is_left {
         mat[ci * stride + cj]
@@ -155,7 +235,8 @@ fn pair_val(mat: &[f32], stride: usize, is_left: bool, ci: usize, cj: usize) -> 
     }
 }
 
-/// Finds connected components in the work graph, returning component-local indices.
+/// Finds connected components among active vertices, returning per-component
+/// vertex lists (in local indices).
 fn find_components(n: usize, adj: &[Vec<u32>], active: &[bool]) -> Vec<Vec<u32>> {
     let mut visited = vec![false; n];
     let mut components = Vec::new();
@@ -266,21 +347,8 @@ fn solve_component(
     (0..cn).map(|ci| (gi(ci), result[ci])).collect()
 }
 
-/// Returns the index of the rotamer with minimum finite energy.
-fn min_energy_rot(se: &[f32]) -> usize {
-    let mut best_r = 0;
-    let mut best_e = PRUNED;
-    for (r, &e) in se.iter().enumerate() {
-        if e < best_e {
-            best_e = e;
-            best_r = r;
-        }
-    }
-    best_r
-}
-
 /// Decomposes edges whose pair energy is well-approximated by a rank-1
-/// factorization `pair(m,n) ≈ a[m] + b[n]`, folding marginals into self-energy.
+/// factorisation `pair(m,n) ≈ a[m] + b[n]`, folding marginals into self-energy.
 fn edge_decompose(
     adj: &mut [Vec<u32>],
     work_edges: &mut Vec<(u32, u32, u32)>,
@@ -377,7 +445,8 @@ fn edge_decompose(
 }
 
 /// Maximum Cardinality Search. Produces a PEO when the graph is chordal.
-fn mcs_order(matrix: &[bool], n: usize) -> Vec<usize> {
+fn mcs_order(matrix: &BitMatrix) -> Vec<usize> {
+    let n: usize = matrix.n;
     let mut numbered = vec![false; n];
     let mut card = vec![0u32; n];
     let mut sigma = vec![0usize; n];
@@ -390,7 +459,7 @@ fn mcs_order(matrix: &[bool], n: usize) -> Vec<usize> {
         sigma[v] = i;
         numbered[v] = true;
         for u in 0..n {
-            if !numbered[u] && matrix[v * n + u] {
+            if !numbered[u] && matrix.test(v, u) {
                 card[u] += 1;
             }
         }
@@ -405,7 +474,8 @@ fn mcs_order(matrix: &[bool], n: usize) -> Vec<usize> {
 
 /// Returns `true` if `order` is a Perfect Elimination Ordering: for each
 /// vertex, its first later neighbor is adjacent to all other later neighbors.
-fn is_peo(matrix: &[bool], n: usize, order: &[usize]) -> bool {
+fn is_peo(matrix: &BitMatrix, order: &[usize]) -> bool {
+    let n = matrix.n;
     let mut pos = vec![0usize; n];
     for (i, &v) in order.iter().enumerate() {
         pos[v] = i;
@@ -414,17 +484,17 @@ fn is_peo(matrix: &[bool], n: usize, order: &[usize]) -> bool {
     for (i, &v) in order.iter().enumerate() {
         let mut f = usize::MAX;
         let mut f_pos = usize::MAX;
-        for u in 0..n {
-            if matrix[v * n + u] && pos[u] > i && pos[u] < f_pos {
-                f_pos = pos[u];
+        for (u, &pu) in pos.iter().enumerate() {
+            if matrix.test(v, u) && pu > i && pu < f_pos {
+                f_pos = pu;
                 f = u;
             }
         }
         if f == usize::MAX {
             continue;
         }
-        for u in 0..n {
-            if u != f && matrix[v * n + u] && pos[u] > i && !matrix[f * n + u] {
+        for (u, &pu) in pos.iter().enumerate() {
+            if u != f && matrix.test(v, u) && pu > i && !matrix.test(f, u) {
                 return false;
             }
         }
@@ -438,45 +508,40 @@ struct Bag {
     sep: Vec<u32>,
 }
 
-/// Builds elimination bags using the best available heuristic (MCS for chordal, min-fill otherwise).
+/// Builds elimination bags using the best heuristic: MCS for chordal graphs,
+/// incremental min-fill otherwise.
 fn eliminate(n: usize, adj: &[Vec<u32>], max_width: usize) -> Option<(Vec<Bag>, usize)> {
     if n == 0 {
         return Some((Vec::new(), 0));
     }
 
-    let mut matrix = vec![false; n * n];
-    for (v, nbrs) in adj.iter().enumerate() {
-        for &u in nbrs {
-            matrix[v * n + u as usize] = true;
-        }
+    let mut matrix = BitMatrix::from_adj(adj);
+
+    let mcs = mcs_order(&matrix);
+    if is_peo(&matrix, &mcs) {
+        return build_bags(&mut matrix, &mcs, max_width);
     }
 
-    let mcs = mcs_order(&matrix, n);
-    if is_peo(&matrix, n, &mcs) {
-        return build_bags(&mut matrix, n, &mcs, max_width);
-    }
-
-    build_bags_min_fill(&mut matrix, n, max_width)
+    build_bags_min_fill(&mut matrix, max_width)
 }
 
 /// Builds bags following a predetermined elimination ordering.
 fn build_bags(
-    matrix: &mut [bool],
-    n: usize,
+    matrix: &mut BitMatrix,
     order: &[usize],
     max_width: usize,
 ) -> Option<(Vec<Bag>, usize)> {
-    let mut eliminated = vec![false; n];
-    let mut bags = Vec::with_capacity(n);
+    let mut eliminated = vec![false; matrix.n];
+    let mut bags = Vec::with_capacity(matrix.n);
     let mut width = 0;
 
     for &v in order {
-        let sep = collect_sep(matrix, n, v, &eliminated);
+        let sep = collect_sep(matrix, v, &eliminated);
         if sep.len() > max_width {
             return None;
         }
         width = width.max(sep.len());
-        apply_fill_in(matrix, n, &sep);
+        matrix.fill_in(&sep);
         eliminated[v] = true;
         bags.push(Bag {
             elim: v as u32,
@@ -488,17 +553,14 @@ fn build_bags(
 }
 
 /// Builds bags with incremental min-fill vertex selection using a priority queue.
-fn build_bags_min_fill(
-    matrix: &mut [bool],
-    n: usize,
-    max_width: usize,
-) -> Option<(Vec<Bag>, usize)> {
+fn build_bags_min_fill(matrix: &mut BitMatrix, max_width: usize) -> Option<(Vec<Bag>, usize)> {
+    let n = matrix.n;
     let mut eliminated = vec![false; n];
     let mut bags = Vec::with_capacity(n);
     let mut width = 0;
 
     let mut fill_cost: Vec<u32> = (0..n)
-        .map(|v| compute_fill(matrix, n, v, &eliminated))
+        .map(|v| compute_fill(matrix, v, &eliminated))
         .collect();
     let mut epoch = vec![0u32; n];
 
@@ -523,7 +585,7 @@ fn build_bags_min_fill(
             break v;
         };
 
-        let sep = collect_sep(matrix, n, v, &eliminated);
+        let sep = collect_sep(matrix, v, &eliminated);
         if sep.len() > max_width {
             return None;
         }
@@ -533,9 +595,9 @@ fn build_bags_min_fill(
         for i in 0..sep.len() {
             for j in (i + 1)..sep.len() {
                 let (a, b) = (sep[i] as usize, sep[j] as usize);
-                if !matrix[a * n + b] {
-                    matrix[a * n + b] = true;
-                    matrix[b * n + a] = true;
+                if !matrix.test(a, b) {
+                    matrix.set(a, b);
+                    matrix.set(b, a);
                     affected.push(a);
                     affected.push(b);
                 }
@@ -549,8 +611,8 @@ fn build_bags_min_fill(
         });
 
         let mut dirty: Vec<usize> = Vec::new();
-        for u in 0..n {
-            if !eliminated[u] && matrix[v * n + u] {
+        for (u, &elim) in eliminated.iter().enumerate() {
+            if !elim && matrix.test(v, u) {
                 dirty.push(u);
             }
         }
@@ -562,7 +624,7 @@ fn build_bags_min_fill(
             if eliminated[u] {
                 continue;
             }
-            let new_cost = compute_fill(matrix, n, u, &eliminated);
+            let new_cost = compute_fill(matrix, u, &eliminated);
             if new_cost != fill_cost[u] {
                 fill_cost[u] = new_cost;
                 epoch[u] = epoch[u].wrapping_add(1);
@@ -575,18 +637,18 @@ fn build_bags_min_fill(
 }
 
 /// Counts the number of missing edges among alive neighbors of `v`.
-fn compute_fill(matrix: &[bool], n: usize, v: usize, eliminated: &[bool]) -> u32 {
-    let row = &matrix[v * n..(v + 1) * n];
-    let mut fill = 0u32;
-    for a in 0..n {
-        if a == v || eliminated[a] || !row[a] {
-            continue;
+fn compute_fill(matrix: &BitMatrix, v: usize, eliminated: &[bool]) -> u32 {
+    let mut nbrs: Vec<usize> = Vec::new();
+    for (u, &elim) in eliminated.iter().enumerate() {
+        if u != v && !elim && matrix.test(v, u) {
+            nbrs.push(u);
         }
-        for b in (a + 1)..n {
-            if b == v || eliminated[b] || !row[b] {
-                continue;
-            }
-            if !matrix[a * n + b] {
+    }
+    let mut fill = 0u32;
+    for i in 0..nbrs.len() {
+        let row_a = matrix.row(nbrs[i]);
+        for &b in &nbrs[i + 1..] {
+            if !BitMatrix::test_in_row(row_a, b) {
                 fill += 1;
             }
         }
@@ -594,23 +656,12 @@ fn compute_fill(matrix: &[bool], n: usize, v: usize, eliminated: &[bool]) -> u32
     fill
 }
 
-/// Ascending alive neighbours of `v` (separator at elimination time).
-fn collect_sep(matrix: &[bool], n: usize, v: usize, eliminated: &[bool]) -> Vec<u32> {
-    (0..n)
-        .filter(|&u| u != v && !eliminated[u] && matrix[v * n + u])
+/// Collects alive (non-eliminated) neighbors of `v` as the separator.
+fn collect_sep(matrix: &BitMatrix, v: usize, eliminated: &[bool]) -> Vec<u32> {
+    (0..matrix.n)
+        .filter(|&u| u != v && !eliminated[u] && matrix.test(v, u))
         .map(|u| u as u32)
         .collect()
-}
-
-/// Makes `sep` vertices pairwise adjacent (clique fill-in).
-fn apply_fill_in(matrix: &mut [bool], n: usize, sep: &[u32]) {
-    for i in 0..sep.len() {
-        for j in (i + 1)..sep.len() {
-            let (a, b) = (sep[i] as usize, sep[j] as usize);
-            matrix[a * n + b] = true;
-            matrix[b * n + a] = true;
-        }
-    }
 }
 
 /// A node in the rooted elimination tree.
@@ -659,219 +710,6 @@ fn root_tree(bags: &[Bag]) -> Vec<TreeNode> {
     nodes
 }
 
-/// Runs the full tree-decomposition DP and writes the GMEC into `result`.
-fn tree_dp(
-    tree: &[TreeNode],
-    local_self: &[Vec<f32>],
-    pair_e: &PairEnergyTable,
-    graph: &ContactGraph,
-    gi: impl Fn(usize) -> usize,
-    work_edges: &[(u32, u32, u32)],
-    result: &mut [usize],
-) {
-    let n_nodes = tree.len();
-    if n_nodes == 0 {
-        return;
-    }
-
-    let cn = local_self.len();
-    let edge_map = build_edge_map(work_edges, &gi, graph);
-
-    let (alive_data, alive_off) = build_alive_table(local_self);
-
-    let max_cands = local_self.iter().map(|se| se.len()).max().unwrap_or(0);
-    let mut rot_to_idx = vec![u32::MAX; cn * max_cands];
-    for ci in 0..cn {
-        let alive = &alive_data[alive_off[ci]..alive_off[ci + 1]];
-        for (idx, &r) in alive.iter().enumerate() {
-            rot_to_idx[ci * max_cands + r] = idx as u32;
-        }
-    }
-
-    let nodes: Vec<NodeInfo> = tree
-        .iter()
-        .map(|tn| NodeInfo::new(tn, &alive_off))
-        .collect();
-
-    let node_edges: Vec<Vec<EdgeInfo>> = nodes
-        .iter()
-        .map(|nd| {
-            nd.sep_cis
-                .iter()
-                .enumerate()
-                .filter_map(|(d, &sci)| {
-                    let elim_is_lo = nd.elim_ci < sci;
-                    let key = if elim_is_lo {
-                        (nd.elim_ci as u32, sci as u32)
-                    } else {
-                        (sci as u32, nd.elim_ci as u32)
-                    };
-                    let &(edge_idx, lo_is_left) = edge_map.get(&key)?;
-                    let is_left = if elim_is_lo { lo_is_left } else { !lo_is_left };
-                    let mat = pair_e.matrix(edge_idx);
-                    let stride = pair_e.dims(edge_idx).1;
-                    Some(EdgeInfo {
-                        sep_dim: d,
-                        mat,
-                        stride,
-                        is_left,
-                    })
-                })
-                .collect()
-        })
-        .collect();
-
-    const ELIM_MARKER: u32 = u32::MAX;
-    let child_maps: Vec<Vec<Vec<u32>>> = (0..n_nodes)
-        .map(|ni| {
-            tree[ni]
-                .children
-                .iter()
-                .map(|&cni| {
-                    let child_node = &nodes[cni as usize];
-                    child_node
-                        .sep_cis
-                        .iter()
-                        .map(|&c_sci| {
-                            if c_sci == nodes[ni].elim_ci {
-                                ELIM_MARKER
-                            } else {
-                                nodes[ni].sep_cis.iter().position(|&x| x == c_sci).unwrap() as u32
-                            }
-                        })
-                        .collect()
-                })
-                .collect()
-        })
-        .collect();
-
-    let mut messages: Vec<Vec<f32>> = (0..n_nodes).map(|_| Vec::new()).collect();
-    let mut tracebacks: Vec<Vec<usize>> = (0..n_nodes).map(|_| Vec::new()).collect();
-
-    let topo = topo_order(tree);
-
-    let max_sep = nodes.iter().map(|nd| nd.sep_cis.len()).max().unwrap_or(0);
-    let mut sep_rots_buf = vec![0usize; max_sep];
-
-    for &ni in &topo {
-        let nd = &nodes[ni];
-        let elim_alive = &alive_data[alive_off[nd.elim_ci]..alive_off[nd.elim_ci + 1]];
-
-        let mut msg = vec![PRUNED; nd.sep_total];
-        let mut tb = vec![0usize; nd.sep_total];
-
-        let sep_rots = &mut sep_rots_buf[..nd.sep_cis.len()];
-
-        for sep_flat in 0..nd.sep_total {
-            for (d, &ci) in nd.sep_cis.iter().enumerate() {
-                let alive = &alive_data[alive_off[ci]..alive_off[ci + 1]];
-                sep_rots[d] = alive[(sep_flat / nd.sep_strides[d]) % nd.sep_dims[d]];
-            }
-
-            let mut best_e = PRUNED;
-            let mut best_r = 0usize;
-
-            for &er in elim_alive {
-                let mut e = local_self[nd.elim_ci][er];
-
-                for ei in &node_edges[ni] {
-                    e += pair_val(ei.mat, ei.stride, ei.is_left, er, sep_rots[ei.sep_dim]);
-                }
-
-                for (ci_idx, &child_ni) in tree[ni].children.iter().enumerate() {
-                    let child_nd = &nodes[child_ni as usize];
-                    let mapping = &child_maps[ni][ci_idx];
-
-                    let mut child_flat = 0usize;
-                    for (d, &src) in mapping.iter().enumerate() {
-                        let rot = if src == ELIM_MARKER {
-                            er
-                        } else {
-                            sep_rots[src as usize]
-                        };
-                        let alive_idx = rot_to_idx[child_nd.sep_cis[d] * max_cands + rot] as usize;
-                        child_flat += alive_idx * child_nd.sep_strides[d];
-                    }
-
-                    e += messages[child_ni as usize][child_flat];
-                }
-
-                if e < best_e {
-                    best_e = e;
-                    best_r = er;
-                }
-            }
-
-            msg[sep_flat] = best_e;
-            tb[sep_flat] = best_r;
-        }
-
-        messages[ni] = msg;
-        tracebacks[ni] = tb;
-    }
-
-    debug_assert!(
-        nodes[0].sep_cis.is_empty(),
-        "root separator must be empty in a valid elimination tree"
-    );
-
-    result[nodes[0].elim_ci] = tracebacks[0][0];
-
-    backtrack(
-        tree,
-        &nodes,
-        &child_maps,
-        &rot_to_idx,
-        max_cands,
-        &tracebacks,
-        result,
-    );
-}
-
-/// Top-down backtracking: assigns rotamers from root to leaves.
-fn backtrack(
-    tree: &[TreeNode],
-    nodes: &[NodeInfo],
-    child_maps: &[Vec<Vec<u32>>],
-    rot_to_idx: &[u32],
-    max_cands: usize,
-    tracebacks: &[Vec<usize>],
-    result: &mut [usize],
-) {
-    const ELIM_MARKER: u32 = u32::MAX;
-
-    let mut stack: Vec<(usize, usize)> = Vec::new();
-
-    for (ci_idx, &child_ni) in tree[0].children.iter().enumerate() {
-        stack.push((0, ci_idx));
-        let _ = child_ni;
-    }
-
-    while let Some((parent_ni, ci_idx)) = stack.pop() {
-        let child_ni = tree[parent_ni].children[ci_idx] as usize;
-        let child_nd = &nodes[child_ni];
-        let mapping = &child_maps[parent_ni][ci_idx];
-
-        let parent_elim_ci = nodes[parent_ni].elim_ci;
-        let mut child_flat = 0usize;
-        for (d, &src) in mapping.iter().enumerate() {
-            let rot = if src == ELIM_MARKER {
-                result[parent_elim_ci]
-            } else {
-                result[nodes[parent_ni].sep_cis[src as usize]]
-            };
-            let alive_idx = rot_to_idx[child_nd.sep_cis[d] * max_cands + rot] as usize;
-            child_flat += alive_idx * child_nd.sep_strides[d];
-        }
-
-        result[child_nd.elim_ci] = tracebacks[child_ni][child_flat];
-
-        for (grandchild_idx, _) in tree[child_ni].children.iter().enumerate() {
-            stack.push((child_ni, grandchild_idx));
-        }
-    }
-}
-
 /// Pre-computed per-node info for the DP inner loop.
 struct NodeInfo {
     elim_ci: usize,
@@ -913,25 +751,21 @@ struct EdgeInfo<'a> {
     is_left: bool,
 }
 
-/// Builds a HashMap for O(1) edge lookup between component-local slot pairs.
-fn build_edge_map(
-    work_edges: &[(u32, u32, u32)],
-    gi: impl Fn(usize) -> usize,
-    graph: &ContactGraph,
-) -> HashMap<(u32, u32), (usize, bool)> {
-    let mut map = HashMap::with_capacity(work_edges.len());
-    for &(ca, cb, eidx) in work_edges {
-        let eidx = eidx as usize;
-        let (ga, _) = graph.edges()[eidx];
-        let ca_is_left = gi(ca as usize) == ga as usize;
-        let key = (ca.min(cb), ca.max(cb));
-        map.insert(key, (eidx, ca_is_left));
-    }
-    map
+/// Read-only context shared across all DP node evaluations.
+struct DpContext<'a> {
+    tree: &'a [TreeNode],
+    nodes: &'a [NodeInfo],
+    node_edges: &'a [Vec<EdgeInfo<'a>>],
+    child_maps: &'a [Vec<Vec<u32>>],
+    local_self: &'a [Vec<f32>],
+    alive_data: &'a [usize],
+    alive_off: &'a [usize],
+    rot_to_idx: &'a [u32],
+    max_cands: usize,
 }
 
-/// Builds a flat alive-rotamer table: `alive_data[off[ci]..off[ci+1]]` holds
-/// the alive rotamer indices for component-local slot `ci`.
+/// Builds a flat alive-rotamer table: `data[off[ci]..off[ci+1]]` holds the
+/// alive rotamer indices for component-local slot `ci`.
 fn build_alive_table(local_self: &[Vec<f32>]) -> (Vec<usize>, Vec<usize>) {
     let cn = local_self.len();
     let mut offsets = vec![0usize; cn + 1];
@@ -951,24 +785,279 @@ fn build_alive_table(local_self: &[Vec<f32>]) -> (Vec<usize>, Vec<usize>) {
     (data, offsets)
 }
 
-/// Returns a bottom-up topological order of the elimination tree nodes.
-fn topo_order(tree: &[TreeNode]) -> Vec<usize> {
+/// Builds a HashMap for O(1) edge lookup between component-local slot pairs.
+fn build_edge_map(
+    work_edges: &[(u32, u32, u32)],
+    gi: &impl Fn(usize) -> usize,
+    graph: &ContactGraph,
+) -> HashMap<(u32, u32), (usize, bool)> {
+    let mut map = HashMap::with_capacity(work_edges.len());
+    for &(ca, cb, eidx) in work_edges {
+        let eidx = eidx as usize;
+        let (ga, _) = graph.edges()[eidx];
+        let ca_is_left = gi(ca as usize) == ga as usize;
+        let key = (ca.min(cb), ca.max(cb));
+        map.insert(key, (eidx, ca_is_left));
+    }
+    map
+}
+
+/// Builds per-node edge info for elim<->sep pair lookups.
+fn build_node_edges<'a>(
+    nodes: &[NodeInfo],
+    edge_map: &HashMap<(u32, u32), (usize, bool)>,
+    pair_e: &'a PairEnergyTable,
+) -> Vec<Vec<EdgeInfo<'a>>> {
+    nodes
+        .iter()
+        .map(|nd| {
+            nd.sep_cis
+                .iter()
+                .enumerate()
+                .filter_map(|(d, &sci)| {
+                    let (lo, hi) = if nd.elim_ci < sci {
+                        (nd.elim_ci as u32, sci as u32)
+                    } else {
+                        (sci as u32, nd.elim_ci as u32)
+                    };
+                    let &(edge_idx, lo_is_left) = edge_map.get(&(lo, hi))?;
+                    let is_left = if nd.elim_ci < sci {
+                        lo_is_left
+                    } else {
+                        !lo_is_left
+                    };
+                    Some(EdgeInfo {
+                        sep_dim: d,
+                        mat: pair_e.matrix(edge_idx),
+                        stride: pair_e.dims(edge_idx).1,
+                        is_left,
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Builds the mapping from each child's separator to its parent's namespace.
+fn build_child_maps(tree: &[TreeNode], nodes: &[NodeInfo]) -> Vec<Vec<Vec<u32>>> {
+    (0..tree.len())
+        .map(|ni| {
+            tree[ni]
+                .children
+                .iter()
+                .map(|&cni| {
+                    nodes[cni as usize]
+                        .sep_cis
+                        .iter()
+                        .map(|&c_sci| {
+                            if c_sci == nodes[ni].elim_ci {
+                                ELIM_MARKER
+                            } else {
+                                nodes[ni].sep_cis.iter().position(|&x| x == c_sci).unwrap() as u32
+                            }
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Runs the full tree-decomposition DP and writes the GMEC into `result`.
+fn tree_dp(
+    tree: &[TreeNode],
+    local_self: &[Vec<f32>],
+    pair_e: &PairEnergyTable,
+    graph: &ContactGraph,
+    gi: impl Fn(usize) -> usize + Sync,
+    work_edges: &[(u32, u32, u32)],
+    result: &mut [usize],
+) {
+    let n_nodes = tree.len();
+    if n_nodes == 0 {
+        return;
+    }
+
+    let cn = local_self.len();
+    let edge_map = build_edge_map(work_edges, &gi, graph);
+    let (alive_data, alive_off) = build_alive_table(local_self);
+
+    let max_cands = local_self.iter().map(|se| se.len()).max().unwrap_or(0);
+    let mut rot_to_idx = vec![u32::MAX; cn * max_cands];
+    for ci in 0..cn {
+        let alive = &alive_data[alive_off[ci]..alive_off[ci + 1]];
+        for (idx, &r) in alive.iter().enumerate() {
+            rot_to_idx[ci * max_cands + r] = idx as u32;
+        }
+    }
+
+    let nodes: Vec<NodeInfo> = tree
+        .iter()
+        .map(|tn| NodeInfo::new(tn, &alive_off))
+        .collect();
+    let node_edges = build_node_edges(&nodes, &edge_map, pair_e);
+    let child_maps = build_child_maps(tree, &nodes);
+
+    let ctx = DpContext {
+        tree,
+        nodes: &nodes,
+        node_edges: &node_edges,
+        child_maps: &child_maps,
+        local_self,
+        alive_data: &alive_data,
+        alive_off: &alive_off,
+        rot_to_idx: &rot_to_idx,
+        max_cands,
+    };
+
+    let mut messages: Vec<Vec<f32>> = (0..n_nodes).map(|_| Vec::new()).collect();
+    let mut tracebacks: Vec<Vec<usize>> = (0..n_nodes).map(|_| Vec::new()).collect();
+
+    let levels = level_order(tree);
+
+    for level in levels.iter().rev() {
+        if level.len() == 1 {
+            let ni = level[0];
+            let (msg, tb) = dp_node(ni, &ctx, &messages);
+            messages[ni] = msg;
+            tracebacks[ni] = tb;
+        } else {
+            let results: Vec<(usize, Vec<f32>, Vec<usize>)> = level
+                .par_iter()
+                .map(|&ni| {
+                    let (msg, tb) = dp_node(ni, &ctx, &messages);
+                    (ni, msg, tb)
+                })
+                .collect();
+            for (ni, msg, tb) in results {
+                messages[ni] = msg;
+                tracebacks[ni] = tb;
+            }
+        }
+    }
+
+    debug_assert!(
+        nodes[0].sep_cis.is_empty(),
+        "root separator must be empty in a valid elimination tree"
+    );
+
+    result[nodes[0].elim_ci] = tracebacks[0][0];
+
+    backtrack(&ctx, &tracebacks, result);
+}
+
+/// Groups tree nodes into BFS levels from the root.
+fn level_order(tree: &[TreeNode]) -> Vec<Vec<usize>> {
     let n = tree.len();
     if n == 0 {
         return Vec::new();
     }
 
-    let mut order = Vec::with_capacity(n);
-    let mut queue = std::collections::VecDeque::with_capacity(n);
-    queue.push_back(0usize);
-    while let Some(ni) = queue.pop_front() {
-        order.push(ni);
-        for &child in &tree[ni].children {
-            queue.push_back(child as usize);
+    let mut levels: Vec<Vec<usize>> = Vec::new();
+    let mut current = vec![0usize];
+    while !current.is_empty() {
+        let mut next = Vec::new();
+        for &ni in &current {
+            for &child in &tree[ni].children {
+                next.push(child as usize);
+            }
+        }
+        levels.push(current);
+        current = next;
+    }
+    levels
+}
+
+/// Computes the DP message and traceback for a single tree node.
+fn dp_node(ni: usize, ctx: &DpContext, messages: &[Vec<f32>]) -> (Vec<f32>, Vec<usize>) {
+    let nd = &ctx.nodes[ni];
+    let elim_alive = &ctx.alive_data[ctx.alive_off[nd.elim_ci]..ctx.alive_off[nd.elim_ci + 1]];
+    let work = nd.sep_total * elim_alive.len();
+
+    let process_sep = |sep_flat: usize| -> (f32, usize) {
+        let mut sep_rots = [0usize; TREEWIDTH_CUT + 1];
+        let sep_rots = &mut sep_rots[..nd.sep_cis.len()];
+        for (d, &ci) in nd.sep_cis.iter().enumerate() {
+            let alive = &ctx.alive_data[ctx.alive_off[ci]..ctx.alive_off[ci + 1]];
+            sep_rots[d] = alive[(sep_flat / nd.sep_strides[d]) % nd.sep_dims[d]];
+        }
+
+        let mut best_e = PRUNED;
+        let mut best_r = 0usize;
+
+        for &er in elim_alive {
+            let mut e = ctx.local_self[nd.elim_ci][er];
+
+            for ei in &ctx.node_edges[ni] {
+                e += pair_val(ei.mat, ei.stride, ei.is_left, er, sep_rots[ei.sep_dim]);
+            }
+
+            for (ci_idx, &child_ni) in ctx.tree[ni].children.iter().enumerate() {
+                let child_nd = &ctx.nodes[child_ni as usize];
+                let mapping = &ctx.child_maps[ni][ci_idx];
+
+                let mut child_flat = 0usize;
+                for (d, &src) in mapping.iter().enumerate() {
+                    let rot = if src == ELIM_MARKER {
+                        er
+                    } else {
+                        sep_rots[src as usize]
+                    };
+                    let alive_idx =
+                        ctx.rot_to_idx[child_nd.sep_cis[d] * ctx.max_cands + rot] as usize;
+                    child_flat += alive_idx * child_nd.sep_strides[d];
+                }
+
+                e += messages[child_ni as usize][child_flat];
+            }
+
+            if e < best_e {
+                best_e = e;
+                best_r = er;
+            }
+        }
+
+        (best_e, best_r)
+    };
+
+    if work >= PAR_SEP_THRESHOLD {
+        (0..nd.sep_total).into_par_iter().map(process_sep).unzip()
+    } else {
+        (0..nd.sep_total).map(process_sep).unzip()
+    }
+}
+
+/// Top-down backtracking: assigns rotamers from root to leaves.
+fn backtrack(ctx: &DpContext, tracebacks: &[Vec<usize>], result: &mut [usize]) {
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+
+    for (ci_idx, _) in ctx.tree[0].children.iter().enumerate() {
+        stack.push((0, ci_idx));
+    }
+
+    while let Some((parent_ni, ci_idx)) = stack.pop() {
+        let child_ni = ctx.tree[parent_ni].children[ci_idx] as usize;
+        let child_nd = &ctx.nodes[child_ni];
+        let mapping = &ctx.child_maps[parent_ni][ci_idx];
+
+        let parent_elim_ci = ctx.nodes[parent_ni].elim_ci;
+        let mut child_flat = 0usize;
+        for (d, &src) in mapping.iter().enumerate() {
+            let rot = if src == ELIM_MARKER {
+                result[parent_elim_ci]
+            } else {
+                result[ctx.nodes[parent_ni].sep_cis[src as usize]]
+            };
+            let alive_idx = ctx.rot_to_idx[child_nd.sep_cis[d] * ctx.max_cands + rot] as usize;
+            child_flat += alive_idx * child_nd.sep_strides[d];
+        }
+
+        result[child_nd.elim_ci] = tracebacks[child_ni][child_flat];
+
+        for (grandchild_idx, _) in ctx.tree[child_ni].children.iter().enumerate() {
+            stack.push((child_ni, grandchild_idx));
         }
     }
-    order.reverse();
-    order
 }
 
 #[cfg(test)]
@@ -976,11 +1065,11 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
-    fn make_matrix(n: usize, edges: &[(usize, usize)]) -> Vec<bool> {
-        let mut m = vec![false; n * n];
+    fn make_matrix(n: usize, edges: &[(usize, usize)]) -> BitMatrix {
+        let mut m = BitMatrix::new(n);
         for &(a, b) in edges {
-            m[a * n + b] = true;
-            m[b * n + a] = true;
+            m.set(a, b);
+            m.set(b, a);
         }
         m
     }
@@ -1013,29 +1102,29 @@ mod tests {
     #[test]
     fn mcs_on_path_produces_peo() {
         let m = make_matrix(3, &[(0, 1), (1, 2)]);
-        let order = mcs_order(&m, 3);
-        assert!(is_peo(&m, 3, &order));
+        let order = mcs_order(&m);
+        assert!(is_peo(&m, &order));
     }
 
     #[test]
     fn mcs_on_triangle_produces_peo() {
         let m = make_matrix(3, &[(0, 1), (0, 2), (1, 2)]);
-        let order = mcs_order(&m, 3);
-        assert!(is_peo(&m, 3, &order));
+        let order = mcs_order(&m);
+        assert!(is_peo(&m, &order));
     }
 
     #[test]
     fn mcs_on_four_cycle_fails_peo() {
         let m = make_matrix(4, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
-        let order = mcs_order(&m, 4);
-        assert!(!is_peo(&m, 4, &order));
+        let order = mcs_order(&m);
+        assert!(!is_peo(&m, &order));
     }
 
     #[test]
     fn is_peo_rejects_non_peo_order_on_chordal_graph() {
         let m = make_matrix(3, &[(0, 1), (1, 2)]);
-        assert!(is_peo(&m, 3, &[0, 1, 2]));
-        assert!(!is_peo(&m, 3, &[1, 0, 2]));
+        assert!(is_peo(&m, &[0, 1, 2]));
+        assert!(!is_peo(&m, &[1, 0, 2]));
     }
 
     #[test]
