@@ -111,7 +111,7 @@ impl<T: Copy> SpatialGrid<T> {
                 unsafe { (sorted_ptr as *mut (Vec3, T)).add(slot).write((*pos, *val)) };
             }
         });
-        // SAFETY: every element has been initialised by the parallel loop above.
+        // SAFETY: every element has been initialized by the parallel loop above.
         let sorted = unsafe {
             std::vec::Vec::from_raw_parts(
                 sorted_uninit.as_mut_ptr() as *mut (Vec3, T),

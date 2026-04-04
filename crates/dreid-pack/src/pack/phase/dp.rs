@@ -17,7 +17,7 @@ const TREEWIDTH_CUT: usize = 5;
 /// Initial threshold for rank-1 edge decomposition.
 const EDGE_DECOMP_THRESHOLD_INIT: f32 = 0.5;
 
-/// Minimum work before parallelising the inner DP loop.
+/// Minimum work before parallelizing the inner DP loop.
 const PAR_SEP_THRESHOLD: usize = 256;
 
 /// Sentinel value mapping a child separator slot to its parent's eliminated vertex.
@@ -31,7 +31,7 @@ struct BitMatrix {
 }
 
 impl BitMatrix {
-    /// Creates a zero-initialised matrix for `n` vertices.
+    /// Creates a zero-initialized matrix for `n` vertices.
     fn new(n: usize) -> Self {
         let stride = n.div_ceil(64);
         Self {
