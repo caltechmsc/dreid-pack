@@ -972,7 +972,6 @@ fn level_order(tree: &[TreeNode]) -> Vec<Vec<usize>> {
 fn dp_node(ni: usize, ctx: &DpContext, messages: &[Vec<f32>]) -> (Vec<f32>, Vec<usize>) {
     let nd = &ctx.nodes[ni];
     let elim_alive = &ctx.alive_data[ctx.alive_off[nd.elim_ci]..ctx.alive_off[nd.elim_ci + 1]];
-    let work = nd.sep_total * elim_alive.len();
 
     let process_sep = |sep_flat: usize| -> (f32, usize) {
         let mut sep_rots = [0usize; TREEWIDTH_CUT + 1];
@@ -1020,11 +1019,11 @@ fn dp_node(ni: usize, ctx: &DpContext, messages: &[Vec<f32>]) -> (Vec<f32>, Vec<
         (best_e, best_r)
     };
 
-    if work >= PAR_SEP_THRESHOLD {
-        (0..nd.sep_total).into_par_iter().map(process_sep).unzip()
-    } else {
-        (0..nd.sep_total).map(process_sep).unzip()
-    }
+    (0..nd.sep_total)
+        .into_par_iter()
+        .with_min_len(PAR_SEP_THRESHOLD)
+        .map(process_sep)
+        .unzip()
 }
 
 /// Top-down backtracking: assigns rotamers from root to leaves.
