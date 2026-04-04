@@ -497,17 +497,16 @@ fn build_bags_min_fill(
     let mut bags = Vec::with_capacity(n);
     let mut width = 0;
 
-    let mut fill_cost = vec![0u32; n];
+    let mut fill_cost: Vec<u32> = (0..n)
+        .map(|v| compute_fill(matrix, n, v, &eliminated))
+        .collect();
     let mut epoch = vec![0u32; n];
 
-    for v in 0..n {
-        fill_cost[v] = compute_fill(matrix, n, v, &eliminated);
-    }
-
-    let mut heap = BinaryHeap::with_capacity(n);
-    for v in 0..n {
-        heap.push(Reverse((fill_cost[v], v as u32, epoch[v])));
-    }
+    let mut heap: BinaryHeap<_> = fill_cost
+        .iter()
+        .enumerate()
+        .map(|(v, &cost)| Reverse((cost, v as u32, 0u32)))
+        .collect();
 
     for _ in 0..n {
         let v = loop {
