@@ -114,14 +114,6 @@ impl PairEnergyTable {
         (self.sizes[edge].0 as usize, self.sizes[edge].1 as usize)
     }
 
-    /// Sets pair energy for candidates `ri`, `rj` on `edge`.
-    pub fn set(&mut self, edge: usize, ri: usize, rj: usize, val: f32) {
-        let (ni, nj) = self.dims(edge);
-        debug_assert!(ri < ni, "ri {ri} out of bounds (n_i={ni})");
-        debug_assert!(rj < nj, "rj {rj} out of bounds (n_j={nj})");
-        self.data[self.offsets[edge] + ri * nj + rj] = val;
-    }
-
     /// Raw sub-matrix slice for `edge` (row-major, length = Ri × Rj).
     pub fn matrix(&self, edge: usize) -> &[f32] {
         debug_assert!(
@@ -130,6 +122,19 @@ impl PairEnergyTable {
             self.n_edges(),
         );
         &self.data[self.offsets[edge]..self.offsets[edge + 1]]
+    }
+
+    /// Returns non-overlapping mutable slices for all edges.
+    pub fn matrices_mut(&mut self) -> Vec<&mut [f32]> {
+        let mut slices = Vec::with_capacity(self.sizes.len());
+        let mut rest = self.data.as_mut_slice();
+        for e in 0..self.sizes.len() {
+            let len = self.offsets[e + 1] - self.offsets[e];
+            let (head, tail) = rest.split_at_mut(len);
+            slices.push(head);
+            rest = tail;
+        }
+        slices
     }
 }
 
@@ -284,22 +289,6 @@ mod tests {
     }
 
     #[test]
-    fn pair_set_then_get_round_trips() {
-        let mut t = PairEnergyTable::new(&[(3, 4)]);
-        t.set(0, 2, 3, -1.5);
-        let nj = t.dims(0).1;
-        assert_eq!(t.matrix(0)[2 * nj + 3], -1.5);
-    }
-
-    #[test]
-    fn pair_edges_are_independent() {
-        let mut t = PairEnergyTable::new(&[(2, 2), (2, 2)]);
-        t.set(0, 1, 0, 7.0);
-        let nj = t.dims(1).1;
-        assert_eq!(t.matrix(1)[nj + 0], 0.0);
-    }
-
-    #[test]
     fn pair_matrix_length_matches_product() {
         let t = PairEnergyTable::new(&[(3, 4), (2, 5)]);
         assert_eq!(t.matrix(0).len(), 12);
@@ -307,36 +296,61 @@ mod tests {
     }
 
     #[test]
-    fn pair_matrix_reflects_set_calls() {
+    fn pair_matrices_mut_empty_returns_empty() {
+        let mut t = PairEnergyTable::new(&[]);
+        assert!(t.matrices_mut().is_empty());
+    }
+
+    #[test]
+    fn pair_matrices_mut_count_matches_edges() {
+        let mut t = PairEnergyTable::new(&[(2, 3), (4, 1), (1, 5)]);
+        assert_eq!(t.matrices_mut().len(), 3);
+    }
+
+    #[test]
+    fn pair_matrices_mut_slice_lengths_match_dims() {
+        let mut t = PairEnergyTable::new(&[(3, 4), (2, 5)]);
+        let slices = t.matrices_mut();
+        assert_eq!(slices[0].len(), 12);
+        assert_eq!(slices[1].len(), 10);
+    }
+
+    #[test]
+    fn pair_matrices_mut_written_data_visible_via_matrix() {
         let mut t = PairEnergyTable::new(&[(2, 3)]);
-        t.set(0, 0, 0, 1.0);
-        t.set(0, 0, 2, 3.0);
-        t.set(0, 1, 1, 5.0);
+        {
+            let mut slices = t.matrices_mut();
+            slices[0][0 * 3 + 0] = 1.0;
+            slices[0][0 * 3 + 2] = 3.0;
+            slices[0][1 * 3 + 1] = 5.0;
+        }
         assert_eq!(t.matrix(0), &[1.0, 0.0, 3.0, 0.0, 5.0, 0.0]);
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    fn pair_set_panics_edge_out_of_bounds() {
-        let mut t = PairEnergyTable::new(&[(2, 3)]);
-        t.set(1, 0, 0, 0.0);
+    fn pair_matrices_mut_edges_are_independent() {
+        let mut t = PairEnergyTable::new(&[(2, 2), (2, 2)]);
+        {
+            let mut slices = t.matrices_mut();
+            slices[0][1 * 2 + 0] = 7.0;
+        }
+        assert_eq!(t.matrix(1)[1 * 2 + 0], 0.0);
     }
 
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic]
-    fn pair_set_panics_ri_out_of_bounds() {
-        let mut t = PairEnergyTable::new(&[(2, 3)]);
-        t.set(0, 2, 0, 0.0);
+    fn pair_dims_panics_edge_out_of_bounds() {
+        let t = PairEnergyTable::new(&[(2, 3)]);
+        let _ = t.dims(1);
     }
 
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic]
-    fn pair_set_panics_rj_out_of_bounds() {
-        let mut t = PairEnergyTable::new(&[(2, 3)]);
-        t.set(0, 0, 3, 0.0);
+    fn pair_matrix_panics_edge_out_of_bounds() {
+        let t = PairEnergyTable::new(&[(2, 3)]);
+        let _ = t.matrix(1);
     }
 
     #[test]

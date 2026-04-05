@@ -36,28 +36,48 @@ pub fn pair(
         })
         .collect();
 
-    let results = match (&ff.vdw, c_d) {
-        (VdwMatrix::LennardJones(m), None) => {
-            compute::<_, false>(&LjKernel(m), slots, conformations, graph, &ff.hbond, 0.0)
-        }
-        (VdwMatrix::LennardJones(m), Some(c)) => {
-            compute::<_, true>(&LjKernel(m), slots, conformations, graph, &ff.hbond, c)
-        }
-        (VdwMatrix::Buckingham(m), None) => {
-            compute::<_, false>(&BuckKernel(m), slots, conformations, graph, &ff.hbond, 0.0)
-        }
-        (VdwMatrix::Buckingham(m), Some(c)) => {
-            compute::<_, true>(&BuckKernel(m), slots, conformations, graph, &ff.hbond, c)
-        }
-    };
-
     let mut table = PairEnergyTable::new(&dims);
-    for (e, energies) in results.into_iter().enumerate() {
-        let nj = dims[e].1 as usize;
-        for (idx, val) in energies.into_iter().enumerate() {
-            table.set(e, idx / nj, idx % nj, val);
-        }
+    let slices = table.matrices_mut();
+
+    match (&ff.vdw, c_d) {
+        (VdwMatrix::LennardJones(m), None) => compute::<_, false>(
+            &LjKernel(m),
+            slots,
+            conformations,
+            graph,
+            &ff.hbond,
+            0.0,
+            slices,
+        ),
+        (VdwMatrix::LennardJones(m), Some(c)) => compute::<_, true>(
+            &LjKernel(m),
+            slots,
+            conformations,
+            graph,
+            &ff.hbond,
+            c,
+            slices,
+        ),
+        (VdwMatrix::Buckingham(m), None) => compute::<_, false>(
+            &BuckKernel(m),
+            slots,
+            conformations,
+            graph,
+            &ff.hbond,
+            0.0,
+            slices,
+        ),
+        (VdwMatrix::Buckingham(m), Some(c)) => compute::<_, true>(
+            &BuckKernel(m),
+            slots,
+            conformations,
+            graph,
+            &ff.hbond,
+            c,
+            slices,
+        ),
     }
+
     debug_assert!(graph.edges().iter().enumerate().all(|(e, &(si, sj))| {
         let (ni, nj) = table.dims(e);
         ni == conformations[si as usize].n_candidates()
@@ -73,7 +93,7 @@ struct SlotAtoms<'a> {
     donors: &'a [u8],
 }
 
-/// Parallel over edges × rotamer pairs: compute per-edge energy matrices.
+/// Parallel over edges: compute per-edge energy matrices directly into table slices.
 fn compute<V: VdwKernel + Sync, const COUL: bool>(
     vdw: &V,
     slots: &[Residue],
@@ -81,11 +101,13 @@ fn compute<V: VdwKernel + Sync, const COUL: bool>(
     graph: &ContactGraph,
     hbond: &HBondParams,
     c_d: f32,
-) -> Vec<Vec<f32>> {
+    slices: Vec<&mut [f32]>,
+) {
     graph
         .edges()
         .par_iter()
-        .map(|&(si, sj)| {
+        .zip(slices)
+        .for_each(|(&(si, sj), out)| {
             let (si, sj) = (si as usize, sj as usize);
             let atoms_i = SlotAtoms {
                 types: slots[si].atom_types(),
@@ -99,24 +121,25 @@ fn compute<V: VdwKernel + Sync, const COUL: bool>(
             };
             let confs_i = &conformations[si];
             let confs_j = &conformations[sj];
+            let ni = confs_i.n_candidates();
             let nj = confs_j.n_candidates();
 
-            (0..confs_i.n_candidates() * nj)
-                .into_par_iter()
-                .map(|idx| {
-                    pair_energy::<V, COUL>(
-                        confs_i.coords_of(idx / nj),
+            for ri in 0..ni {
+                let coords_i = confs_i.coords_of(ri);
+                let row = ri * nj;
+                for rj in 0..nj {
+                    out[row + rj] = pair_energy::<V, COUL>(
+                        coords_i,
                         &atoms_i,
-                        confs_j.coords_of(idx % nj),
+                        confs_j.coords_of(rj),
                         &atoms_j,
                         vdw,
                         hbond,
                         c_d,
-                    )
-                })
-                .collect()
-        })
-        .collect()
+                    );
+                }
+            }
+        });
 }
 
 /// Non-bonded pair energy between two candidate conformations.
