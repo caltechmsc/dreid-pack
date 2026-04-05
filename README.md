@@ -52,7 +52,7 @@ cargo install dreid-pack
 
 ```toml
 [dependencies]
-dreid-pack = "0.1.0"
+dreid-pack = "0.2.0"
 ```
 
 Set `default-features = false` to exclude the CLI dependencies (`clap`, `anyhow`, `indicatif`, `console`).
